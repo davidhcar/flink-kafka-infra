@@ -1,7 +1,7 @@
 # Project dependencies: java, maven, flink, lein
 
 [tasks."docker:start:all"]
-description = "Start all required Docker containers (Kafka, Flink, Postgres, Kafka UI)"
+description = "Start all required Docker containers (Kafka, Flink, Postgres, Schema Registry, Kafka UI)"
 run = "docker compose -f docker/docker-compose.yml up -d"
 
 [tasks."docker:ps"]
@@ -18,6 +18,10 @@ run = "open http://localhost:8080"
 [tasks."open:flink-ui"]
 description = "Open Flink Dashboard web interface in browser (port 8081)"
 run = "open http://localhost:8081"
+
+[tasks."open:schema-registry"]
+description = "Open Schema Registry web interface in browser (port 8084)"
+run = "open http://localhost:8084/subjects"
 
 [tasks."flink:build"]
 description = "Build Flink Jobs JAR package using Maven"
