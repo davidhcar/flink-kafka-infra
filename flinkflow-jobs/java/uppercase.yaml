@@ -1,0 +1,11 @@
+name: "Quick Start"
+steps:
+  - type: source
+    name: static-source
+    properties:
+      content: "Flinkflow,is,running,in,docker"
+  - type: process
+    name: upper-case
+    code: "return input.toUpperCase() + '!';"
+  - type: sink
+    name: console-sink

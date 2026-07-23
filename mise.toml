@@ -42,6 +42,73 @@ depends = ["flink:jobs:cancel", "flink:build"]
 description = "Run Customer Debezium job that processes CDC events from PostgreSQL via Kafka"
 run = "flink run -c flinkfintechpoc.jobs.CustomerDebeziumJob flink-jobs/target/flink-jobs-1.0-SNAPSHOT.jar"
 
+[tasks."ff:list"]
+description = "List FlinkFlow YAML pipelines and select one to run"
+run = '''#!/usr/bin/env bash
+if [ ! -d "flinkflow-jobs" ]; then
+	echo "Directory not found: flinkflow-jobs" >&2
+	exit 1
+fi
+
+pipelines=$(find flinkflow-jobs -type f \( -name '*.yaml' -o -name '*.yml' \) | sort)
+if [ -z "$pipelines" ]; then
+	echo "No YAML pipelines found in flinkflow-jobs" >&2
+	exit 1
+fi
+
+echo "Select a pipeline to run:"
+IFS=$'\n'
+select pipeline in $pipelines; do
+	if [ -n "$pipeline" ]; then
+		name="${pipeline#flinkflow-jobs/}"
+		name="${name%.yaml}"
+		name="${name%.yml}"
+		case "$name" in
+			java/*)
+				echo "Running: mise run ff-java:run ${name#java/}"
+				mise run ff-java:run "${name#java/}"
+				break
+				;;
+			python/*)
+				echo "Running: mise run ff-py:run ${name#python/}"
+				mise run ff-py:run "${name#python/}"
+				break
+				;;
+			*)
+				echo "No runner configured for $pipeline"
+				break
+				;;
+		esac
+	else
+		echo "Invalid selection."
+	fi
+done
+'''
+
+[tasks."ff-java:run"]
+description = "Run a FlinkFlow YAML pipeline in Docker"
+dir = "flinkflow-jobs/java"
+usage = 'arg "<pipeline>" help="Pipeline YAML file"'
+run = '''
+pipeline="${usage_pipeline?}.yaml"
+docker run --rm -v "$(pwd)/${pipeline}:/app/pipeline.yaml" \
+	ghcr.io/talwegai/flinkflow:0.9.6 \
+	java -cp "/opt/flink/usrlib/flinkflow.jar:/opt/flink/lib/*" \
+	ai.talweg.flinkflow.FlinkflowApp /app/pipeline.yaml
+'''
+
+[tasks."ff-py:run"]
+description = "Run a Python FlinkFlow YAML pipeline in Docker"
+dir = "flinkflow-jobs/python"
+usage = 'arg "<pipeline>" help="Pipeline YAML file"'
+run = '''
+pipeline="${usage_pipeline?}.yaml"
+docker run --rm -v "$(pwd)/${pipeline}:/app/pipeline.yaml" \
+	ghcr.io/talwegai/flinkflow:0.9.6 \
+	java -cp "/opt/flink/usrlib/flinkflow.jar:/opt/flink/lib/*" \
+	ai.talweg.flinkflow.FlinkflowApp /app/pipeline.yaml
+'''
+
 [tasks."flink:jobs:cancel"]
 description = "Cancel all currently running Flink jobs"
 run = "flink list -r | grep -Eo '[0-9a-f]{32}' | xargs -n 1 flink cancel"
