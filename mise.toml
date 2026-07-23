@@ -4,6 +4,18 @@
 description = "Start all required Docker containers (Kafka, Flink, Postgres, Schema Registry, Kafka UI)"
 run = "docker compose -f docker/docker-compose.yml up -d"
 
+[tasks."docker:stop:all"]
+description = "Stop all running Docker containers"
+run = "docker compose -f docker/docker-compose.yml down --remove-orphans"
+
+[tasks."docker:restart:all"]
+description = "Restart all Docker containers"
+run = "docker compose -f docker/docker-compose.yml restart"
+
+[tasks."docker:rebuild:all"]
+description = "Rebuild and start all required Docker containers"
+run = "docker compose -f docker/docker-compose.yml up -d --build"
+
 [tasks."docker:ps"]
 run = "docker compose -f docker/docker-compose.yml ps"
 
@@ -74,6 +86,11 @@ select pipeline in $pipelines; do
 				mise run ff-py:run "${name#python/}"
 				break
 				;;
+			sql/*)
+				echo "Running: mise run ff-sql:run ${name#sql/}"
+				mise run ff-sql:run "${name#sql/}"
+				break
+				;;
 			*)
 				echo "No runner configured for $pipeline"
 				break
@@ -89,24 +106,108 @@ done
 description = "Run a FlinkFlow YAML pipeline in Docker"
 dir = "flinkflow-jobs/java"
 usage = 'arg "<pipeline>" help="Pipeline YAML file"'
-run = '''
+run = '''#!/usr/bin/env bash
 pipeline="${usage_pipeline?}.yaml"
-docker run --rm -v "$(pwd)/${pipeline}:/app/pipeline.yaml" \
+docker run --rm --network host -v "$(pwd)/${pipeline}:/app/pipeline.yaml" \
 	ghcr.io/talwegai/flinkflow:0.9.6 \
-	java -cp "/opt/flink/usrlib/flinkflow.jar:/opt/flink/lib/*" \
-	ai.talweg.flinkflow.FlinkflowApp /app/pipeline.yaml
+	java \
+	-cp "/opt/flink/usrlib/flinkflow.jar:/opt/flink/lib/*" \
+	ai.talweg.flinkflow.FlinkflowApp /app/pipeline.yaml 2>&1 | grep -v "SLF4J:" | {
+	spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+	i=0
+	first_line=1
+	while true; do
+		if read -t 0.1 -r line; then
+			if [ $first_line -eq 1 ]; then
+				printf "\033[2K\r"
+				first_line=0
+			fi
+			echo "$line"
+		else
+			ret=$?
+			if [ $ret -gt 128 ]; then
+				if [ $first_line -eq 1 ]; then
+					i=$(( (i+1) % 10 ))
+					printf "\033[2K\r${spin:$i:1} Loading Flinkflow..."
+				fi
+			else
+				break
+			fi
+		fi
+	done
+}
 '''
 
 [tasks."ff-py:run"]
 description = "Run a Python FlinkFlow YAML pipeline in Docker"
 dir = "flinkflow-jobs/python"
 usage = 'arg "<pipeline>" help="Pipeline YAML file"'
-run = '''
+run = '''#!/usr/bin/env bash
 pipeline="${usage_pipeline?}.yaml"
-docker run --rm -v "$(pwd)/${pipeline}:/app/pipeline.yaml" \
+docker run --rm --network host -v "$(pwd)/${pipeline}:/app/pipeline.yaml" \
 	ghcr.io/talwegai/flinkflow:0.9.6 \
-	java -cp "/opt/flink/usrlib/flinkflow.jar:/opt/flink/lib/*" \
-	ai.talweg.flinkflow.FlinkflowApp /app/pipeline.yaml
+	java \
+	-cp "/opt/flink/usrlib/flinkflow.jar:/opt/flink/lib/*" \
+	ai.talweg.flinkflow.FlinkflowApp /app/pipeline.yaml 2>&1 | grep -v "SLF4J:" | {
+	spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+	i=0
+	first_line=1
+	while true; do
+		if read -t 0.1 -r line; then
+			if [ $first_line -eq 1 ]; then
+				printf "\033[2K\r"
+				first_line=0
+			fi
+			echo "$line"
+		else
+			ret=$?
+			if [ $ret -gt 128 ]; then
+				if [ $first_line -eq 1 ]; then
+					i=$(( (i+1) % 10 ))
+					printf "\033[2K\r${spin:$i:1} Loading Flinkflow..."
+				fi
+			else
+				break
+			fi
+		fi
+	done
+}
+'''
+
+[tasks."ff-sql:run"]
+description = "Run a SQL FlinkFlow YAML pipeline in Docker"
+dir = "flinkflow-jobs/sql"
+usage = 'arg "<pipeline>" help="Pipeline YAML file"'
+run = '''#!/usr/bin/env bash
+pipeline="${usage_pipeline?}.yaml"
+docker run --rm --network host -v "$(pwd)/${pipeline}:/app/pipeline.yaml" \
+	ghcr.io/talwegai/flinkflow:0.9.6 \
+	java \
+	-cp "/opt/flink/usrlib/flinkflow.jar:/opt/flink/lib/*" \
+	ai.talweg.flinkflow.FlinkflowApp /app/pipeline.yaml 2>&1 | grep -v "SLF4J:" | {
+	spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+	i=0
+	first_line=1
+	while true; do
+		if read -t 0.1 -r line; then
+			if [ $first_line -eq 1 ]; then
+				printf "\033[2K\r"
+				first_line=0
+			fi
+			echo "$line"
+		else
+			ret=$?
+			if [ $ret -gt 128 ]; then
+				if [ $first_line -eq 1 ]; then
+					i=$(( (i+1) % 10 ))
+					printf "\033[2K\r${spin:$i:1} Loading Flinkflow..."
+				fi
+			else
+				break
+			fi
+		fi
+	done
+}
 '''
 
 [tasks."flink:jobs:cancel"]

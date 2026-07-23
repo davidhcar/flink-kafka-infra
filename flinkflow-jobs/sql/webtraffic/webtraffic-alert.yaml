@@ -1,0 +1,49 @@
+name: "Webtraffic Windowed Aggregation"
+parallelism: 1
+
+steps:
+  - type: source
+    name: webtraffic_source
+    connector: kafka-source
+    properties:
+      bootstrap.servers: "localhost:9092"
+      topic: "webtraffic"
+      group.id: "webtraffic-report-group-v2"
+      scan.startup.mode: "latest-offset"
+      
+  - type: sql
+    name: windowed-aggregation
+    inputs: [webtraffic_source]
+    properties:
+      schema.webtraffic_source.userId: "string"
+      schema.webtraffic_source.eventType: "string"
+      schema.webtraffic_source.page: "string"
+      schema.webtraffic_source.eventTime: "timestamp"
+      watermark.webtraffic_source.column: "eventTime"
+      watermark.webtraffic_source.delay: "2"
+
+      # Alerts when a page is visited 50 or more times within a 2-minute window
+      query: |
+        SELECT 
+          page,
+          TUMBLE_START(eventTime, INTERVAL '2' MINUTE) AS window_start,
+          TUMBLE_END(eventTime, INTERVAL '2' MINUTE) AS window_end,
+          COUNT(*) AS visitCount,
+          'ALERT: High traffic detected on page (potential scraping).' AS alertMessage
+        FROM webtraffic_source
+        GROUP BY 
+          TUMBLE(eventTime, INTERVAL '2' MINUTE),
+          page
+        HAVING COUNT(*) >= 200
+
+  - type: sink
+    name: console-sink
+    inputs: [windowed-aggregation]
+
+  - type: sink
+    name: alert-kafka-sink
+    connector: kafka-sink
+    inputs: [windowed-aggregation]
+    properties:
+      bootstrap.servers: "localhost:9092"
+      topic: "webtraffic-alerts"
