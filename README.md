@@ -58,8 +58,9 @@ To start the infrastructure:
 cd docker
 docker-compose up -d
 
-# Or using mise task
-mise run docker:start:all
+# Or using mise tasks
+mise run docker:start:flinkflow  # For Kafka & Flink infrastructure
+mise run docker:start:langfuse   # For Langfuse LLM monitoring infrastructure
 ```
 
 ### Connecting to PostgreSQL
@@ -71,3 +72,18 @@ mise run postgres:connect
 ```
 
 This will open a psql session connected to the PostgreSQL instance running in Docker.
+
+## Environment Configuration
+
+All connection environment variables are centrally managed:
+
+### Local Development (`env.local`)
+Local connection details and topic names are defined in [`env.local`](file:///t:/home/dmichael/0Talweg/OS/flink-kafka-infra/env.local), which is automatically loaded by `mise` (via `[env]` in `mise.toml`) and passed to `ff-jobmanager` / `ff-taskmanager` via `docker-compose.yml`:
+
+- `KAFKA_BOOTSTRAP_SERVERS`: `kafka:29092` (container) / `localhost:9092` (host)
+- `SCHEMA_REGISTRY_URL`: `http://schema-registry:8081`
+- `POSTGRES_URL`: `jdbc:postgresql://postgres:5432/outbox_demo`
+- `VOCAB_SERVICE_URL`: `http://vocab-service:8082`
+
+### Production (Kubernetes Pattern)
+In Kubernetes deployments, variables are injected into Flinkflow pods via Secrets and ConfigMaps, and referenced in DSL YAMLs using standard placeholders (e.g., `${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}`) or `secret:secret-name/key`.

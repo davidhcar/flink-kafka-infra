@@ -90,5 +90,5 @@ steps:
     name: kafka-sink
     inputs: ["merge-and-aggregate"]
     properties:
-      bootstrap.servers: "localhost:9092"
-      topic: "webtraffic"
+      bootstrap.servers: "${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}"
+      topic: "${WEBTRAFFIC_TOPIC:-webtraffic}"

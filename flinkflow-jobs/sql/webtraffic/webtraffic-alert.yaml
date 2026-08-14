@@ -6,9 +6,9 @@ steps:
     name: webtraffic_source
     connector: kafka-source
     properties:
-      bootstrap.servers: "localhost:9092"
-      topic: "webtraffic"
-      group.id: "webtraffic-report-group-v2"
+      bootstrap.servers: "${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}"
+      topic: "${WEBTRAFFIC_TOPIC:-webtraffic}"
+      group.id: "${WEBTRAFFIC_GROUP_ID:-webtraffic-report-group-v2}"
       scan.startup.mode: "latest-offset"
       
   - type: sql
@@ -45,5 +45,5 @@ steps:
     connector: kafka-sink
     inputs: [windowed-aggregation]
     properties:
-      bootstrap.servers: "localhost:9092"
-      topic: "webtraffic-alerts"
+      bootstrap.servers: "${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}"
+      topic: "${WEBTRAFFIC_ALERTS_TOPIC:-webtraffic-alerts}"

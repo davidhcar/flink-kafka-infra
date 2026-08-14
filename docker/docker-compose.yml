@@ -6,10 +6,11 @@ services:
       - "9092:9092"
       - "9093:9093"
     healthcheck:
-      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 9092 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 60s
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
@@ -39,6 +40,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 60s
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -59,10 +61,11 @@ services:
     ports:
       - "8084:8081"
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8081/subjects || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8081/subjects || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 120s
     environment:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
@@ -81,10 +84,11 @@ services:
     ports:
       - "8083:8083"
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8083/connectors || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8083/connectors || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 120s
     environment:
       BOOTSTRAP_SERVERS: kafka:29092
       GROUP_ID: connect-cluster
@@ -116,29 +120,196 @@ services:
       KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium
       KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect:8083
 
-  jobmanager:
+  ff-jobmanager:
     image: ghcr.io/talwegai/flinkflow:latest
+    hostname: ff-jobmanager
+    container_name: ff-jobmanager
     ports:
       - "8081:8081"
+    env_file:
+      - path: ../env.local
+        required: false
     environment:
-      - JOB_MANAGER_RPC_ADDRESS=jobmanager
+      - JOB_MANAGER_RPC_ADDRESS=ff-jobmanager
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}
+      - SCHEMA_REGISTRY_URL=${SCHEMA_REGISTRY_URL:-http://schema-registry:8081}
+      - POSTGRES_URL=${POSTGRES_URL:-jdbc:postgresql://postgres:5432/outbox_demo}
+      - VOCAB_SERVICE_URL=${VOCAB_SERVICE_URL:-http://vocab-service:8082}
+    volumes:
+      - ../flinkflow-jobs:/opt/flink/flinkflow-jobs:ro
     command: jobmanager
+
+  ff-taskmanager:
+    image: ghcr.io/talwegai/flinkflow:latest
+    hostname: ff-taskmanager
+    container_name: ff-taskmanager
+    depends_on:
+      - ff-jobmanager
+    env_file:
+      - path: ../env.local
+        required: false
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=ff-jobmanager
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=4
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}
+      - SCHEMA_REGISTRY_URL=${SCHEMA_REGISTRY_URL:-http://schema-registry:8081}
+      - POSTGRES_URL=${POSTGRES_URL:-jdbc:postgresql://postgres:5432/outbox_demo}
+      - VOCAB_SERVICE_URL=${VOCAB_SERVICE_URL:-http://vocab-service:8082}
+    volumes:
+      - ../flinkflow-jobs:/opt/flink/flinkflow-jobs:ro
+    command: taskmanager
+
+  vocab-service:
+    image: python:3.11-slim
+    hostname: vocab-service
+    container_name: vocab-service
+    ports:
+      - "8082:8082"
+    volumes:
+      - ../flinkflow-jobs/hybrid/omop:/app
+
+    command: python /app/vocab_service.py 8082
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8081" ]
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8082/health\")'"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+  
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.4
+    container_name: clickhouse
+    user: "101:101"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    environment:
+      - CLICKHOUSE_DB=langfuse
+      - CLICKHOUSE_USER=langfuse
+      - CLICKHOUSE_PASSWORD=langfuse_password
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "127.0.0.1:8123/ping"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 3
+      start_period: 60s
 
-  taskmanager:
-    image: ghcr.io/talwegai/flinkflow:latest
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    entrypoint: sh -c 'mkdir -p /data/langfuse && exec minio server /data --console-address ":9001"'
+    ports:
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadminpassword
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    volumes:
+      - minio_data:/data
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+
+  langfuse:
+    image: langfuse/langfuse:4
+    container_name: langfuse
     depends_on:
-      jobmanager:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "4000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXTAUTH_URL=http://localhost:4000
+      - NEXTAUTH_SECRET=my_super_secret_nextauth_key_change_me
+      - SALT=my_super_secret_salt_key_change_me
+      # Postgres Database URL
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/outbox_demo
+      # ClickHouse Integration
+      - CLICKHOUSE_URL=http://clickhouse:8123
+      - CLICKHOUSE_MIGRATION_URL=clickhouse://clickhouse:9000
+      - CLICKHOUSE_USER=langfuse
+      - CLICKHOUSE_PASSWORD=langfuse_password
+      - CLICKHOUSE_DB=langfuse
+      - CLICKHOUSE_CLUSTER_ENABLED=false
+      - LANGFUSE_ENABLE_CLICKHOUSE=true
+      # Redis Connection
+      - REDIS_CONNECTION_STRING=redis://redis:6379
+      # S3/MinIO Integration for Raw Events
+      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse
+      - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://minio:9000
+      - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=minioadmin
+      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=minioadminpassword
+      - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
+      - LANGFUSE_S3_EVENT_UPLOAD_REGION=us-east-1
+      - LANGFUSE_LOG_LEVEL=debug
+      - LOG_LEVEL=debug
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:4
+    container_name: langfuse-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
-      - JOB_MANAGER_RPC_ADDRESS=jobmanager
-      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=2
-    command: taskmanager
+      - NODE_ENV=production
+      - NEXTAUTH_URL=http://localhost:4000
+      - NEXTAUTH_SECRET=my_super_secret_nextauth_key_change_me
+      - SALT=my_super_secret_salt_key_change_me
+      # Postgres Database URL
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/outbox_demo
+      # ClickHouse Integration
+      - CLICKHOUSE_URL=http://clickhouse:8123
+      - CLICKHOUSE_MIGRATION_URL=clickhouse://clickhouse:9000
+      - CLICKHOUSE_USER=langfuse
+      - CLICKHOUSE_PASSWORD=langfuse_password
+      - CLICKHOUSE_DB=langfuse
+      - CLICKHOUSE_CLUSTER_ENABLED=false
+      - LANGFUSE_ENABLE_CLICKHOUSE=true
+      # Redis Connection
+      - REDIS_CONNECTION_STRING=redis://redis:6379
+      # S3/MinIO Integration for Raw Events
+      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse
+      - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://minio:9000
+      - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=minioadmin
+      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=minioadminpassword
+      - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
+      - LANGFUSE_S3_EVENT_UPLOAD_REGION=us-east-1
+      - LANGFUSE_LOG_LEVEL=debug
+      - LOG_LEVEL=debug
+
 
 volumes:
   kafka-data:
   postgres-data:
+  clickhouse_data:
+  minio_data:
+

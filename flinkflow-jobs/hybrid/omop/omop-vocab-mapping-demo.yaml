@@ -1,0 +1,337 @@
+name: "OMOP Vocab Mapping Demo - Multi-Source Windowed Clinical State & CDSS Pipeline"
+parallelism: 1
+
+# ==============================================================================
+# BUSINESS USE CASE: Real-Time Multi-Source OMOP Harmonization & CDSS Alerting
+# ==============================================================================
+# Clinical Problem:
+#   In acute care (ICU/Emergency), clinical signals arrive from disparate, incompatible
+#   systems: Bedside Monitors (LOINC), LIS Lab Analyzers (Proprietary Local Codes), 
+#   Inpatient Pharmacy Dispensers (NDC Drug Codes), and EHR Diagnoses (ICD-10-CM).
+#   Alerting on isolated single-source events produces noisy, false-positive alerts.
+#
+# Solution & Stream Architecture:
+#   1. Continuous multi-source event generation across active patient cohorts.
+#   2. Real-time dynamic standardization of heterogeneous codes to OHDSI OMOP 
+#      Standard Concept IDs via microservice lookup (/maps-to on port 8082).
+#   3. Flink SQL 10-second Tumbling Window (TUMBLE) aggregating all feeds per patient.
+#   4. Multi-Source CDSS Clinical State Assessment (e.g. Septic Shock = Sepsis Dx + 
+#      Hyperlactatemia > 2.0 + Vasopressor IV; Hypertensive Urgency; Hyperkalemia).
+#   5. Dual-destination publishing: Raw standardized events -> 'omop-standard-events', 
+#      and multi-source clinical patient alerts -> 'omop-clinical-alerts' + Console.
+# ==============================================================================
+
+steps:
+  # ===========================================================================
+  # 1. REAL-TIME MULTI-SOURCE HEALTHCARE DATA GENERATOR (ALL 4 CLINICAL FEEDS)
+  # ===========================================================================
+  - type: source
+    name: healthcare_datagen
+    connector: datagen-source
+    properties:
+      rowsPerSecond: "4"
+
+  - type: process
+    name: generate_multi_source_feed
+    language: python
+    code: |
+      import json, random, time
+
+      # Multi-source ICU / Inpatient Cohort (Events correlated by shared Patient ID)
+      patients = ["PATIENT-101", "PATIENT-102", "PATIENT-103", "PATIENT-104", "PATIENT-105"]
+      patient_id = random.choice(patients)
+      source_type = random.choice(["EHR_VITALS", "LEGACY_LAB", "PHARMACY", "CONDITION"])
+      now = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+
+      if source_type == "EHR_VITALS":
+          # Source A: Epic EHR Bedside Telemetry & Vitals (LOINC - HL7 FHIR Observation)
+          loincs = [
+              ("8480-6", str(random.randint(90, 165)), "mmHg"),       # Systolic BP
+              ("8867-4", str(random.randint(55, 135)), "bpm"),         # Heart Rate
+              ("2339-0", str(random.randint(70, 240)), "mg/dL"),       # Point-of-Care Glucose
+              ("2518-8", f"{random.uniform(0.6, 4.5):.1f}", "mmol/L") # Blood Lactate
+          ]
+          code, val, unit = random.choice(loincs)
+          return json.dumps({
+              "source_name": "Source A (EHR Vitals Feed)",
+              "person_source_value": patient_id,
+              "source_vocabulary": "LOINC",
+              "source_code": code,
+              "value": val,
+              "unit": unit,
+              "event_time": now
+          })
+
+      elif source_type == "LEGACY_LAB":
+          # Source B: Legacy Hospital LIS Lab Analyzer (Proprietary Local LIS Feed)
+          legacy_codes = [
+              ("GLUC-STAT", str(random.randint(75, 210)), "mg/dL"),        # Stat Glucose
+              ("K-PANEL", f"{random.uniform(3.2, 5.9):.1f}", "mmol/L"),   # Stat Potassium
+              ("HR_MONITOR", str(random.randint(60, 130)), "bpm")          # Telemetry HR
+          ]
+          code, val, unit = random.choice(legacy_codes)
+          return json.dumps({
+              "source_name": "Source B (Legacy Lab Analyzer)",
+              "person_source_value": patient_id,
+              "source_vocabulary": "LEGACY_LAB_LOCAL",
+              "source_code": code,
+              "value": val,
+              "unit": unit,
+              "event_time": now
+          })
+
+      elif source_type == "PHARMACY":
+          # Source C: Automated Inpatient Pharmacy Dispenser (FDA NDC Drug Feed)
+          ndcs = [
+              ("00093-7146-01", "Metformin 500mg Oral", "1", "dose"),
+              ("00186-0771-31", "Lisinopril 10mg Oral", "1", "dose"),
+              ("00069-3150-83", "Norepinephrine 4mg IV", "1", "infusion"),
+              ("00409-7332-01", "Vancomycin 1g IV", "1", "infusion")
+          ]
+          code, name, val, unit = random.choice(ndcs)
+          return json.dumps({
+              "source_name": "Source C (Pharmacy Dispense Feed)",
+              "person_source_value": patient_id,
+              "source_vocabulary": "NDC",
+              "source_code": code,
+              "value": val,
+              "unit": unit,
+              "event_time": now
+          })
+
+      else:
+          # Source D: EHR Diagnoses & Problem List Stream (ICD-10-CM Condition Feed)
+          icds = [
+              ("A41.9", "Sepsis, unspecified organism"),
+              ("R65.20", "Severe sepsis without septic shock"),
+              ("R65.21", "Severe sepsis with septic shock"),
+              ("I10", "Essential (primary) hypertension")
+          ]
+          code, desc = random.choice(icds)
+          return json.dumps({
+              "source_name": "Source D (EHR Diagnoses Feed)",
+              "person_source_value": patient_id,
+              "source_vocabulary": "ICD10CM",
+              "source_code": code,
+              "value": desc,
+              "unit": "diagnosis",
+              "event_time": now
+          })
+
+  # ===========================================================================
+  # 2. REAL-TIME OMOP VOCABULARY STANDARDIZATION (DYNAMIC HTTP LOOKUP)
+  # ===========================================================================
+  - type: process
+    name: map_to_omop_concept
+    language: python
+    code: |
+      import json, os, urllib.request, urllib.parse
+
+      # Sourced dynamically from env.local (VOCAB_SERVICE_URL)
+      BASE_URL = os.environ.get("VOCAB_SERVICE_URL", "${VOCAB_SERVICE_URL:-http://vocab-service:8082}").rstrip("/")
+
+      d = json.loads(input)
+      vocab = str(d.get("source_vocabulary", "")).strip()
+      code = str(d.get("source_code", "")).strip()
+
+      # Parse numeric value if available for SQL aggregation
+      raw_val = d.get("value", "0")
+      try:
+          d["value_num"] = float(raw_val)
+      except (ValueError, TypeError):
+          d["value_num"] = 0.0
+
+      if not vocab or not code:
+          # OMOP Concept 0 = No matching concept / Unmapped
+          d["standard_concept_id"] = 0
+          d["standard_concept_name"] = f"Missing Concept ({vocab}:{code})"
+          d["domain_id"] = "Observation"
+          return json.dumps(d)
+
+      try:
+          params = urllib.parse.urlencode({"vocab": vocab, "code": code})
+          req = urllib.request.Request(f"{BASE_URL}/maps-to?{params}", headers={"User-Agent": "Flinkflow-OMOP-Pipeline"})
+          with urllib.request.urlopen(req, timeout=2.0) as resp:
+              mapping = json.loads(resp.read().decode("utf-8"))
+              d["standard_concept_id"] = int(mapping.get("concept_id", 0))
+              d["standard_concept_name"] = str(mapping.get("concept_name", f"Unmapped ({vocab}:{code})"))
+              d["domain_id"] = str(mapping.get("domain_id", "Observation"))
+      except Exception:
+          # Safe fallback to OMOP Concept 0 on network/service failure
+          d["standard_concept_id"] = 0
+          d["standard_concept_name"] = f"Lookup Error ({vocab}:{code})"
+          d["domain_id"] = "Observation"
+
+      return json.dumps(d)
+
+  # ===========================================================================
+  # 3. KAFKA PRODUCER 1: PUBLISH STANDARDIZED OMOP EVENTS (omop-standard-events)
+  # ===========================================================================
+  - type: sink
+    name: omop_standard_events_sink
+    connector: kafka-sink
+    inputs:
+      - map_to_omop_concept
+    properties:
+      topic: "${OMOP_EVENTS_TOPIC:-omop-standard-events}"
+      bootstrap.servers: "${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}"
+
+  # ===========================================================================
+  # 4. FLINK WINDOWED MULTI-SOURCE CLINICAL STATE AGGREGATION & CDSS ENGINE
+  # ===========================================================================
+  - type: sql
+    name: clinical_alerts
+    inputs:
+      - map_to_omop_concept
+    properties:
+      schema.map_to_omop_concept.person_source_value: "string"
+      schema.map_to_omop_concept.source_name: "string"
+      schema.map_to_omop_concept.source_vocabulary: "string"
+      schema.map_to_omop_concept.source_code: "string"
+      schema.map_to_omop_concept.value: "string"
+      schema.map_to_omop_concept.value_num: "double"
+      schema.map_to_omop_concept.unit: "string"
+      schema.map_to_omop_concept.event_time: "timestamp"
+      schema.map_to_omop_concept.standard_concept_id: "int"
+      schema.map_to_omop_concept.standard_concept_name: "string"
+      schema.map_to_omop_concept.domain_id: "string"
+      watermark.map_to_omop_concept.column: "event_time"
+      watermark.map_to_omop_concept.delay: "2"
+      query: |
+        SELECT 
+          person_source_value AS patient_id,
+          CAST(TUMBLE_START(event_time, INTERVAL '10' SECOND) AS STRING) AS window_start,
+          CAST(TUMBLE_END(event_time, INTERVAL '10' SECOND) AS STRING) AS window_end,
+          COUNT(*) AS total_clinical_events,
+          COUNT(DISTINCT source_name) AS distinct_sources_count,
+          
+          -- Aggregated Vitals & Lab Measurements
+          COALESCE(MAX(CASE WHEN standard_concept_id = 3027018 THEN value_num ELSE NULL END), 0.0) AS max_systolic_bp,
+          COALESCE(MAX(CASE WHEN standard_concept_id = 3004249 THEN value_num ELSE NULL END), 0.0) AS max_heart_rate,
+          COALESCE(MAX(CASE WHEN standard_concept_id = 3004501 THEN value_num ELSE NULL END), 0.0) AS max_glucose,
+          COALESCE(MAX(CASE WHEN standard_concept_id = 3006615 THEN value_num ELSE NULL END), 0.0) AS max_lactate,
+          COALESCE(MAX(CASE WHEN standard_concept_id = 3023103 THEN value_num ELSE NULL END), 0.0) AS max_potassium,
+          
+          -- Domain event counts
+          COUNT(CASE WHEN standard_concept_id IN (132302, 4100676, 4100677) THEN 1 ELSE NULL END) AS sepsis_dx_count,
+          COUNT(CASE WHEN domain_id = 'Drug' AND standard_concept_id = 1337424 THEN 1 ELSE NULL END) AS vasopressor_dispenses,
+          COUNT(CASE WHEN domain_id = 'Drug' THEN 1 ELSE NULL END) AS total_med_dispenses,
+
+          -- Synthesized Clinical State & Alert Evaluation
+          CASE
+            WHEN COUNT(CASE WHEN standard_concept_id IN (132302, 4100676, 4100677) THEN 1 ELSE NULL END) > 0 
+                 AND MAX(CASE WHEN standard_concept_id = 3006615 THEN value_num ELSE NULL END) > 2.0 
+                 AND COUNT(CASE WHEN standard_concept_id = 1337424 THEN 1 ELSE NULL END) > 0 
+              THEN '🚨 CRITICAL: SEPTIC SHOCK (Active Sepsis Dx + Hyperlactatemia > 2.0 + Vasopressor IV)'
+            
+            WHEN (COUNT(CASE WHEN standard_concept_id IN (132302, 4100676, 4100677) THEN 1 ELSE NULL END) > 0 AND MAX(CASE WHEN standard_concept_id = 3006615 THEN value_num ELSE NULL END) > 2.0)
+                 OR (MAX(CASE WHEN standard_concept_id = 3006615 THEN value_num ELSE NULL END) > 2.0 AND MAX(CASE WHEN standard_concept_id = 3004249 THEN value_num ELSE NULL END) > 100)
+              THEN '🚨 CRITICAL: SEVERE SEPSIS RISK (Lactate Spike > 2.0 mmol/L + Tachycardia/Sepsis Dx)'
+            
+            WHEN MAX(CASE WHEN standard_concept_id = 3027018 THEN value_num ELSE NULL END) > 140
+              THEN '🚨 CRITICAL: HYPERTENSIVE URGENCY (Systolic BP > 140 mmHg)'
+            
+            WHEN MAX(CASE WHEN standard_concept_id = 3023103 THEN value_num ELSE NULL END) > 5.0
+              THEN '🚨 CRITICAL: HYPERKALEMIA SPIKE (Serum Potassium > 5.0 mmol/L)'
+            
+            WHEN MAX(CASE WHEN standard_concept_id = 3004501 THEN value_num ELSE NULL END) > 180
+              THEN '⚠️ WARNING: SEVERE HYPERGLYCEMIA (Blood Glucose > 180 mg/dL)'
+            
+            WHEN MAX(CASE WHEN standard_concept_id = 3004249 THEN value_num ELSE NULL END) > 100
+              THEN '⚠️ WARNING: TACHYCARDIA (Resting Heart Rate > 100 bpm)'
+            
+            ELSE '🩺 PATIENT STATE MONITORED (Within Baseline Parameters)'
+          END AS clinical_state_summary,
+
+          CASE 
+            WHEN (COUNT(CASE WHEN standard_concept_id IN (132302, 4100676, 4100677) THEN 1 ELSE NULL END) > 0 AND MAX(CASE WHEN standard_concept_id = 3006615 THEN value_num ELSE NULL END) > 2.0)
+                 OR (MAX(CASE WHEN standard_concept_id = 3027018 THEN value_num ELSE NULL END) > 140)
+                 OR (MAX(CASE WHEN standard_concept_id = 3023103 THEN value_num ELSE NULL END) > 5.0)
+              THEN '🚨 CRITICAL ALERT'
+            WHEN (MAX(CASE WHEN standard_concept_id = 3004501 THEN value_num ELSE NULL END) > 180)
+                 OR (MAX(CASE WHEN standard_concept_id = 3004249 THEN value_num ELSE NULL END) > 100)
+              THEN '⚠️ WARNING ALERT'
+            ELSE 'ℹ️ PATIENT STATE'
+          END AS indicator
+        FROM map_to_omop_concept
+        GROUP BY 
+          TUMBLE(event_time, INTERVAL '10' SECOND),
+          person_source_value
+
+  # ===========================================================================
+  # 5. CONSOLE OUTPUT FORMATTER (Formats Multi-Source Windowed Alert Report)
+  # ===========================================================================
+  - type: process
+    name: format_raw_console
+    language: python
+    inputs:
+      - clinical_alerts
+    code: |
+      import json
+      try:
+          d = json.loads(input)
+          pid = str(d.get("patient_id", "UNKNOWN"))
+          w_start = str(d.get("window_start", ""))
+          w_end = str(d.get("window_end", ""))
+          total_events = str(d.get("total_clinical_events", 0))
+          sources_count = str(d.get("distinct_sources_count", 0))
+          
+          bp = f"{d['max_systolic_bp']:.0f} mmHg" if d.get("max_systolic_bp", 0) > 0 else "N/A"
+          hr = f"{d['max_heart_rate']:.0f} bpm" if d.get("max_heart_rate", 0) > 0 else "N/A"
+          gluc = f"{d['max_glucose']:.0f} mg/dL" if d.get("max_glucose", 0) > 0 else "N/A"
+          lact = f"{d['max_lactate']:.1f} mmol/L" if d.get("max_lactate", 0) > 0 else "N/A"
+          k = f"{d['max_potassium']:.1f} mmol/L" if d.get("max_potassium", 0) > 0 else "N/A"
+          sepsis_dx = int(d.get("sepsis_dx_count", 0))
+          vaso = int(d.get("vasopressor_dispenses", 0))
+          meds = int(d.get("total_med_dispenses", 0))
+
+          summary = str(d.get("clinical_state_summary", ""))
+          indicator = str(d.get("indicator", "ℹ️ PATIENT STATE"))
+      except Exception:
+          pid = "UNKNOWN"
+          w_start, w_end = "", ""
+          total_events, sources_count = "0", "0"
+          bp, hr, gluc, lact, k = "N/A", "N/A", "N/A", "N/A", "N/A"
+          sepsis_dx, vaso, meds = 0, 0, 0
+          summary = str(input)
+          indicator = "⚠️ PARSE_ERROR"
+
+      color = "\033[1;31m" if "CRITICAL" in indicator else ("\033[1;33m" if "WARNING" in indicator else "\033[1;36m")
+      reset = "\033[0m"
+      bold = "\033[1m"
+
+      card = (
+          f"\n{color}════════════════════════════════════════════════════════════════════════════════════════════════════{reset}\n"
+          f"{bold}🏥 [OMOP CDSS WINDOWED PATIENT STATE]{reset} {color}{indicator}{reset}\n"
+          f"   {bold}Patient ID:{reset} {pid:<14} | {bold}Window:{reset} {w_start} -> {w_end}\n"
+          f"   {bold}Harmonized Feeds:{reset} {sources_count} clinical sources | {bold}Total Events Aggregated:{reset} {total_events}\n"
+          f"   ----------------------------------------------------------------------------------------------------\n"
+          f"   🩺 {bold}Vitals:{reset} BP: {bp} | HR: {hr}\n"
+          f"   🧪 {bold}Labs:{reset}   Lactate: {lact} | Potassium: {k} | Glucose: {gluc}\n"
+          f"   📋 {bold}EHR Dx:{reset} Sepsis Diagnoses: {sepsis_dx} | 💊 {bold}Meds:{reset} Total Dispenses: {meds} (Vasopressors: {vaso})\n"
+          f"   ----------------------------------------------------------------------------------------------------\n"
+          f"   📋 {bold}Clinical Assessment:{reset} {color}{summary}{reset}\n"
+          f"{color}════════════════════════════════════════════════════════════════════════════════════════════════════{reset}\n"
+      )
+      return card
+
+  # ===========================================================================
+  # 6. KAFKA PRODUCER 2: PUBLISH EVALUATED CLINICAL ALERTS (omop-clinical-alerts)
+  # ===========================================================================
+  - type: sink
+    name: omop_clinical_alerts_sink
+    connector: kafka-sink
+    inputs:
+      - format_raw_console
+    properties:
+      topic: "${OMOP_ALERTS_TOPIC:-omop-clinical-alerts}"
+      bootstrap.servers: "${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}"
+
+  # ===========================================================================
+  # 7. LIVE TERMINAL CONSOLE SINK (stdout)
+  # ===========================================================================
+  - type: sink
+    name: console_sink
+    connector: console
+    inputs:
+      - format_raw_console
