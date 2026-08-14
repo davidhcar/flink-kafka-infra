@@ -135,6 +135,11 @@ services:
       - SCHEMA_REGISTRY_URL=${SCHEMA_REGISTRY_URL:-http://schema-registry:8081}
       - POSTGRES_URL=${POSTGRES_URL:-jdbc:postgresql://postgres:5432/outbox_demo}
       - VOCAB_SERVICE_URL=${VOCAB_SERVICE_URL:-http://vocab-service:8082}
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - LLM_MODEL=${LLM_MODEL:-gemini-2.0-flash}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
     volumes:
       - ../flinkflow-jobs:/opt/flink/flinkflow-jobs:ro
     command: jobmanager
@@ -155,6 +160,11 @@ services:
       - SCHEMA_REGISTRY_URL=${SCHEMA_REGISTRY_URL:-http://schema-registry:8081}
       - POSTGRES_URL=${POSTGRES_URL:-jdbc:postgresql://postgres:5432/outbox_demo}
       - VOCAB_SERVICE_URL=${VOCAB_SERVICE_URL:-http://vocab-service:8082}
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - LLM_MODEL=${LLM_MODEL:-gemini-2.0-flash}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
     volumes:
       - ../flinkflow-jobs:/opt/flink/flinkflow-jobs:ro
     command: taskmanager

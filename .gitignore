@@ -1,6 +1,19 @@
+# IDE & Compiler
 .idea
 *.iml
 out
 **/target
 .rendered
 flinkflow-jobs/.rendered
+
+# Local Environment & Secrets (Never commit)
+env.local
+*.local
+.env
+.env.*
+!.env.template
+!env.template
+*.key
+*.pem
+__pycache__/
+*.pyc

@@ -252,20 +252,62 @@ steps:
                  OR (MAX(CASE WHEN standard_concept_id = 3004249 THEN value_num ELSE NULL END) > 100)
               THEN '⚠️ WARNING ALERT'
             ELSE 'ℹ️ PATIENT STATE'
-          END AS indicator
+          END AS alert_level
         FROM map_to_omop_concept
         GROUP BY 
           TUMBLE(event_time, INTERVAL '10' SECOND),
           person_source_value
 
   # ===========================================================================
-  # 5. CONSOLE OUTPUT FORMATTER (Formats Multi-Source Windowed Alert Report)
+  # 5. KAFKA PRODUCER 2: PUBLISH STANDARD JSON CLINICAL ALERTS (omop-clinical-alerts)
+  # ===========================================================================
+  - type: process
+    name: format_standard_alert_json
+    language: python
+    inputs:
+      - clinical_alerts
+    code: |
+      import json
+      try:
+          d = json.loads(input) if isinstance(input, str) else input
+          payload = {
+              "patient_id": str(d.get("patient_id", "UNKNOWN")),
+              "window_start": str(d.get("window_start", "")),
+              "window_end": str(d.get("window_end", "")),
+              "alert_level": str(d.get("alert_level", "ℹ️ PATIENT STATE")),
+              "clinical_state_summary": str(d.get("clinical_state_summary", "")),
+              "total_clinical_events": int(d.get("total_clinical_events", 0)),
+              "distinct_sources_count": int(d.get("distinct_sources_count", 0)),
+              "max_systolic_bp": float(d.get("max_systolic_bp", 0.0)),
+              "max_heart_rate": float(d.get("max_heart_rate", 0.0)),
+              "max_glucose": float(d.get("max_glucose", 0.0)),
+              "max_lactate": float(d.get("max_lactate", 0.0)),
+              "max_potassium": float(d.get("max_potassium", 0.0)),
+              "sepsis_dx_count": int(d.get("sepsis_dx_count", 0)),
+              "vasopressor_dispenses": int(d.get("vasopressor_dispenses", 0)),
+              "total_med_dispenses": int(d.get("total_med_dispenses", 0))
+          }
+          return json.dumps(payload)
+      except Exception:
+          return json.dumps({"patient_id": "UNKNOWN", "alert_level": "⚠️ PARSE_ERROR", "clinical_state_summary": str(input)})
+
+  - type: sink
+    name: omop_clinical_alerts_sink
+    connector: kafka-sink
+    inputs:
+      - format_standard_alert_json
+    properties:
+      topic: "${OMOP_ALERTS_TOPIC:-omop-clinical-alerts}"
+      bootstrap.servers: "${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}"
+
+  # ===========================================================================
+  # 6. CONSOLE OUTPUT FORMATTER (Formats Multi-Source Windowed Alert Report)
   # ===========================================================================
   - type: process
     name: format_raw_console
     language: python
     inputs:
-      - clinical_alerts
+      - format_standard_alert_json
     code: |
       import json
       try:
@@ -286,7 +328,7 @@ steps:
           meds = int(d.get("total_med_dispenses", 0))
 
           summary = str(d.get("clinical_state_summary", ""))
-          indicator = str(d.get("indicator", "ℹ️ PATIENT STATE"))
+          indicator = str(d.get("alert_level", "ℹ️ PATIENT STATE"))
       except Exception:
           pid = "UNKNOWN"
           w_start, w_end = "", ""
@@ -314,18 +356,6 @@ steps:
           f"{color}════════════════════════════════════════════════════════════════════════════════════════════════════{reset}\n"
       )
       return card
-
-  # ===========================================================================
-  # 6. KAFKA PRODUCER 2: PUBLISH EVALUATED CLINICAL ALERTS (omop-clinical-alerts)
-  # ===========================================================================
-  - type: sink
-    name: omop_clinical_alerts_sink
-    connector: kafka-sink
-    inputs:
-      - format_raw_console
-    properties:
-      topic: "${OMOP_ALERTS_TOPIC:-omop-clinical-alerts}"
-      bootstrap.servers: "${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}"
 
   # ===========================================================================
   # 7. LIVE TERMINAL CONSOLE SINK (stdout)

@@ -36,6 +36,26 @@ VOCABULARY_INDEX = {
     },
 
     # Legacy Lab Local Codes
+    ("LEGACY_LAB_LOCAL", "LAB_LACT_01"): {
+        "concept_id": 3006615,
+        "concept_name": "Blood lactate",
+        "domain_id": "Measurement"
+    },
+    ("LEGACY_LAB_LOCAL", "LAB_POT_02"): {
+        "concept_id": 3023103,
+        "concept_name": "Potassium [Moles/volume] in Blood",
+        "domain_id": "Measurement"
+    },
+    ("LEGACY_LAB_LOCAL", "LAB_GLUC_03"): {
+        "concept_id": 3004501,
+        "concept_name": "Glucose [Mass/volume] in Blood",
+        "domain_id": "Measurement"
+    },
+    ("LEGACY_LAB_LOCAL", "LAB_WBC_04"): {
+        "concept_id": 3000905,
+        "concept_name": "Leukocytes [#/volume] in Blood",
+        "domain_id": "Measurement"
+    },
     ("LEGACY_LAB_LOCAL", "GLUC-STAT"): {
         "concept_id": 3004501,
         "concept_name": "Glucose [Mass/volume] in Blood",
@@ -46,6 +66,11 @@ VOCABULARY_INDEX = {
         "concept_name": "Potassium [Moles/volume] in Blood",
         "domain_id": "Measurement"
     },
+    ("LEGACY_LAB_LOCAL", "LACT-STAT"): {
+        "concept_id": 3006615,
+        "concept_name": "Blood lactate",
+        "domain_id": "Measurement"
+    },
     ("LEGACY_LAB_LOCAL", "HR_MONITOR"): {
         "concept_id": 3004249,
         "concept_name": "Heart rate",
@@ -53,6 +78,11 @@ VOCABULARY_INDEX = {
     },
 
     # Pharmacy Feed (NDC Drug Codes)
+    ("NDC", "00002-1433-61"): {
+        "concept_id": 1502800,
+        "concept_name": "Insulin Regular Human 100 UNT/ML Injectable Solution",
+        "domain_id": "Drug"
+    },
     ("NDC", "00093-7146-01"): {
         "concept_id": 1503297,
         "concept_name": "Metformin hydrochloride 500 MG Oral Tablet",

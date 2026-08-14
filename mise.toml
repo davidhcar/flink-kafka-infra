@@ -52,32 +52,32 @@ description = "List status of all running Docker containers"
 run = "docker compose -f docker/docker-compose.yml ps"
 
 # -----------------------------------------------------------------------------
-# WEB INTERFACE UTILITIES
+# WEB INTERFACE UTILITIES (Cross-Platform Browser Launcher: WSL, Linux, macOS, Windows)
 # -----------------------------------------------------------------------------
 
 [tasks."open:kafka-ui"]
 description = "Open Kafka UI web interface in browser (port 8080)"
-run = "open http://localhost:8080"
+run = "cmd.exe /c start \"\" \"http://localhost:8080\" 2>/dev/null || powershell.exe -NoProfile -Command \"Start-Process 'http://localhost:8080'\" 2>/dev/null || wslview \"http://localhost:8080\" 2>/dev/null || xdg-open \"http://localhost:8080\" 2>/dev/null || open \"http://localhost:8080\""
 
 [tasks."open:flink-ui"]
 description = "Open Flink Dashboard web interface in browser (port 8081)"
-run = "open http://localhost:8081"
+run = "cmd.exe /c start \"\" \"http://localhost:8081\" 2>/dev/null || powershell.exe -NoProfile -Command \"Start-Process 'http://localhost:8081'\" 2>/dev/null || wslview \"http://localhost:8081\" 2>/dev/null || xdg-open \"http://localhost:8081\" 2>/dev/null || open \"http://localhost:8081\""
 
 [tasks."open:vocab-service"]
 description = "Open OMOP Vocabulary Service health check in browser (port 8082)"
-run = "open http://localhost:8082/health"
+run = "cmd.exe /c start \"\" \"http://localhost:8082/health\" 2>/dev/null || powershell.exe -NoProfile -Command \"Start-Process 'http://localhost:8082/health'\" 2>/dev/null || wslview \"http://localhost:8082/health\" 2>/dev/null || xdg-open \"http://localhost:8082/health\" 2>/dev/null || open \"http://localhost:8082/health\""
 
 [tasks."open:schema-registry"]
 description = "Open Schema Registry web interface in browser (port 8084)"
-run = "open http://localhost:8084/subjects"
+run = "cmd.exe /c start \"\" \"http://localhost:8084/subjects\" 2>/dev/null || powershell.exe -NoProfile -Command \"Start-Process 'http://localhost:8084/subjects'\" 2>/dev/null || wslview \"http://localhost:8084/subjects\" 2>/dev/null || xdg-open \"http://localhost:8084/subjects\" 2>/dev/null || open \"http://localhost:8084/subjects\""
 
 [tasks."open:langfuse"]
 description = "Open Langfuse Web UI in browser (port 4000)"
-run = "open http://localhost:4000"
+run = "cmd.exe /c start \"\" \"http://localhost:4000\" 2>/dev/null || powershell.exe -NoProfile -Command \"Start-Process 'http://localhost:4000'\" 2>/dev/null || wslview \"http://localhost:4000\" 2>/dev/null || xdg-open \"http://localhost:4000\" 2>/dev/null || open \"http://localhost:4000\""
 
 [tasks."open:minio"]
 description = "Open MinIO Console in browser (port 9001)"
-run = "open http://localhost:9001"
+run = "cmd.exe /c start \"\" \"http://localhost:9001\" 2>/dev/null || powershell.exe -NoProfile -Command \"Start-Process 'http://localhost:9001'\" 2>/dev/null || wslview \"http://localhost:9001\" 2>/dev/null || xdg-open \"http://localhost:9001\" 2>/dev/null || open \"http://localhost:9001\""
 
 # -----------------------------------------------------------------------------
 # FLINK NATIVE JOBS TASKS
@@ -90,11 +90,6 @@ run = "docker compose -f docker/docker-compose.yml logs -f --tail=50 ff-taskmana
 [tasks."flink:build"]
 description = "Build Flink Jobs JAR package using Maven"
 run = "cd flink-jobs && mvn clean package"
-
-[tasks."flink:run:customer-analytics"]
-depends = ["flink:build"]
-description = "Run Customer Analytics job that counts customers created per minute"
-run = "flink run -c flinkfintechpoc.jobs.CustomerAnalyticsJob flink-jobs/target/flink-jobs-1.0-SNAPSHOT.jar"
 
 [tasks."flink:run:word-count"]
 depends = ["flink:build"]
@@ -266,17 +261,40 @@ usage = 'arg "<pipeline>" help="Pipeline YAML file (e.g. omop/omop-vocab-mapping
 run = 'mise run ff:local "hybrid/$usage_pipeline"'
 
 # -----------------------------------------------------------------------------
+# SCHEMA REGISTRY UTILITIES
+# -----------------------------------------------------------------------------
+
+[tasks."schema:register:all"]
+description = "Automatically discover and register all schemas in schemas/ directory with Schema Registry"
+run = "python3 scripts/register_schemas.py 2>/dev/null || python scripts/register_schemas.py || py scripts/register_schemas.py"
+
+[tasks."schema:register"]
+description = "Register a specific schema file or pattern (e.g. mise run schema:register 'omop*')"
+usage = 'arg "<target>" help="Schema file path or pattern in schemas/"'
+run = 'python3 scripts/register_schemas.py "$usage_target" 2>/dev/null || python scripts/register_schemas.py "$usage_target" || py scripts/register_schemas.py "$usage_target"'
+
+[tasks."schema:register:omop"]
+description = "Register OMOP event and alert schemas with Confluent Schema Registry"
+run = 'mise run schema:register "omop*"'
+
+[tasks."schema:list"]
+description = "List all registered subjects from Confluent Schema Registry"
+run = "curl -s ${SCHEMA_REGISTRY_URL_LOCAL:-http://localhost:8084}/subjects | jq . 2>/dev/null || curl -s ${SCHEMA_REGISTRY_URL_LOCAL:-http://localhost:8084}/subjects"
+
+# -----------------------------------------------------------------------------
 # OHDSI OMOP DEMO HELPER ALIASES
 # -----------------------------------------------------------------------------
 
 [tasks."kafka:reset:omop"]
-description = "Purge and recreate Kafka topics omop-standard-events and omop-clinical-alerts"
+description = "Purge and recreate Kafka topics omop-standard-events, omop-clinical-alerts, and omop-cdss-ai-alerts"
 run = '''
 docker compose -f docker/docker-compose.yml exec -T kafka sh -c '
   kafka-topics --bootstrap-server ${KAFKA_BOOTSTRAP_SERVERS_LOCAL:-localhost:9092} --delete --topic ${OMOP_EVENTS_TOPIC:-omop-standard-events} 2>/dev/null || true
   kafka-topics --bootstrap-server ${KAFKA_BOOTSTRAP_SERVERS_LOCAL:-localhost:9092} --delete --topic ${OMOP_ALERTS_TOPIC:-omop-clinical-alerts} 2>/dev/null || true
+  kafka-topics --bootstrap-server ${KAFKA_BOOTSTRAP_SERVERS_LOCAL:-localhost:9092} --delete --topic ${OMOP_AI_ALERTS_TOPIC:-omop-cdss-ai-alerts} 2>/dev/null || true
   kafka-topics --bootstrap-server ${KAFKA_BOOTSTRAP_SERVERS_LOCAL:-localhost:9092} --create --topic ${OMOP_EVENTS_TOPIC:-omop-standard-events} --partitions 1 --replication-factor 1 2>/dev/null || true
   kafka-topics --bootstrap-server ${KAFKA_BOOTSTRAP_SERVERS_LOCAL:-localhost:9092} --create --topic ${OMOP_ALERTS_TOPIC:-omop-clinical-alerts} --partitions 1 --replication-factor 1 2>/dev/null || true
+  kafka-topics --bootstrap-server ${KAFKA_BOOTSTRAP_SERVERS_LOCAL:-localhost:9092} --create --topic ${OMOP_AI_ALERTS_TOPIC:-omop-cdss-ai-alerts} --partitions 1 --replication-factor 1 2>/dev/null || true
 '
 '''
 
@@ -284,18 +302,59 @@ docker compose -f docker/docker-compose.yml exec -T kafka sh -c '
 description = "Stream live clinical alerts directly from Kafka topic omop-clinical-alerts"
 run = "docker compose -f docker/docker-compose.yml exec -T kafka kafka-console-consumer --bootstrap-server ${KAFKA_BOOTSTRAP_SERVERS_LOCAL:-localhost:9092} --topic ${OMOP_ALERTS_TOPIC:-omop-clinical-alerts}"
 
+[tasks."omop:consume:ai-alerts"]
+description = "Stream live AI CDSS diagnostic alerts directly from Kafka topic omop-cdss-ai-alerts"
+run = "docker compose -f docker/docker-compose.yml exec -T kafka kafka-console-consumer --bootstrap-server ${KAFKA_BOOTSTRAP_SERVERS_LOCAL:-localhost:9092} --topic ${OMOP_AI_ALERTS_TOPIC:-omop-cdss-ai-alerts}"
+
 [tasks."omop:consume:events"]
 description = "Stream live standardized OMOP events directly from Kafka topic omop-standard-events"
 run = "docker compose -f docker/docker-compose.yml exec -T kafka kafka-console-consumer --bootstrap-server ${KAFKA_BOOTSTRAP_SERVERS_LOCAL:-localhost:9092} --topic ${OMOP_EVENTS_TOPIC:-omop-standard-events}"
 
 [tasks."omop:run-demo"]
-depends = ["kafka:reset:omop"]
-description = "Run the hybrid inline datagen OMOP Vocab Mapping pipeline (auto-clears Kafka topic and resets TaskManager on start)"
+depends = ["schema:register:omop", "kafka:reset:omop"]
+description = "Run the hybrid inline datagen OMOP Vocab Mapping pipeline (auto-registers schemas, clears Kafka topic, and runs pipeline)"
 run = '''
 mise run ff:run hybrid/omop/omop-vocab-mapping-demo
 echo "Streaming live clinical alerts (Press Ctrl+C to exit log stream)..."
 mise run flink:logs
 '''
+
+[tasks."omop:run-ai-demo"]
+depends = ["schema:register:omop", "kafka:reset:omop"]
+description = "Run the AI CDSS Agent OMOP streaming pipeline with Google Gemini / LLM reasoning (auto-registers schemas and resets Kafka)"
+run = '''
+mise run ff:run hybrid/omop/omop-ai-cdss-agent
+echo "Streaming live AI CDSS assessments (Press Ctrl+C to exit log stream)..."
+mise run flink:logs
+'''
+
+[tasks."test:omop"]
+description = "Run comprehensive unit test suite for modular OMOP AI CDSS pipeline"
+run = "python -m unittest discover -s flinkflow-jobs/hybrid/omop/tests -p \"test_*.py\" -v"
+
+# -----------------------------------------------------------------------------
+# KUBERNETES & APACHE FLINK OPERATOR (Production GitOps Lifecycle)
+# -----------------------------------------------------------------------------
+
+[tasks."k8s:init"]
+description = "Initialize cert-manager and Apache Flink Kubernetes Operator in WSL/Kubernetes"
+run = "bash scripts/k8s_setup_wsl.sh"
+
+[tasks."k8s:deploy:omop"]
+description = "Compile modular DAG, update ConfigMap & Secrets, and submit FlinkDeployment to Flink Operator"
+run = "bash scripts/deploy_k8s.sh"
+
+[tasks."k8s:status"]
+description = "Check status of Flink deployments and pods in flink-production namespace"
+run = "kubectl get flinkdeployment,pods,svc -n flink-production -o wide"
+
+[tasks."k8s:logs"]
+description = "Tail live logs from the Flink JobManager pod in Kubernetes"
+run = "kubectl logs -n flink-production -l app.kubernetes.io/name=omop-ai-cdss-pipeline -c flink-main-container -f"
+
+[tasks."k8s:ui"]
+description = "Port-forward Flink Web Dashboard from Kubernetes to http://localhost:8081"
+run = "kubectl port-forward -n flink-production svc/omop-ai-cdss-pipeline-rest 8081:8081"
 
 # -----------------------------------------------------------------------------
 # OTHER DATABASE & SIMULATION HELPERS

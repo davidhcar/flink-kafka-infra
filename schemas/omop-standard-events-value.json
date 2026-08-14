@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OmopStandardEvent",
+  "description": "Standardized Healthcare Event conforming to OHDSI OMOP Common Data Model",
+  "type": "object",
+  "required": [
+    "person_source_value",
+    "source_name",
+    "source_vocabulary",
+    "source_code",
+    "event_time",
+    "standard_concept_id",
+    "standard_concept_name",
+    "domain_id"
+  ],
+  "properties": {
+    "person_source_value": {
+      "type": "string",
+      "description": "Unique Patient Identifier / Medical Record Number (MRN)"
+    },
+    "source_name": {
+      "type": "string",
+      "description": "Source System Feed (e.g. EHR Vitals, LIS Lab, Pharmacy, EHR Diagnoses)"
+    },
+    "source_vocabulary": {
+      "type": "string",
+      "description": "Originating Medical Terminology (LOINC, NDC, ICD10CM, LEGACY_LAB_LOCAL)"
+    },
+    "source_code": {
+      "type": "string",
+      "description": "Raw clinical source code"
+    },
+    "value": {
+      "type": "string",
+      "description": "Raw observed value or description"
+    },
+    "value_num": {
+      "type": "number",
+      "description": "Numeric representation of the observed value for quantitative metrics"
+    },
+    "unit": {
+      "type": "string",
+      "description": "Measurement unit (e.g. mmHg, bpm, mmol/L, mg/dL)"
+    },
+    "event_time": {
+      "type": "string",
+      "description": "Event timestamp in ISO format (YYYY-MM-DD HH:MM:SS)"
+    },
+    "standard_concept_id": {
+      "type": "integer",
+      "description": "OHDSI OMOP Standard Concept ID (e.g. 3027018, 3006615, 132302)"
+    },
+    "standard_concept_name": {
+      "type": "string",
+      "description": "OHDSI OMOP Standard Concept Name"
+    },
+    "domain_id": {
+      "type": "string",
+      "description": "OMOP CDM Domain (Measurement, Condition, Drug, Observation)"
+    }
+  }
+}

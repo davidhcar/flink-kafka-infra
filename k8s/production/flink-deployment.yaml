@@ -1,0 +1,66 @@
+# ==============================================================================
+# Flinkflow Kubernetes Production Deployment Manifest
+# Official Standard: https://talwegai.github.io/flinkflow/DEPLOY_K8S
+# Managed by: Apache Flink Kubernetes Operator (FlinkDeployment CRD)
+# ==============================================================================
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: omop-ai-cdss-pipeline
+  namespace: flink-production
+  labels:
+    app.kubernetes.io/name: omop-ai-cdss-pipeline
+    app.kubernetes.io/part-of: flinkflow
+    pipeline: omop-ai-cdss
+spec:
+  image: ghcr.io/talwegai/flinkflow:latest
+  imagePullPolicy: IfNotPresent
+  flinkVersion: v1_18
+
+  # High Availability & RocksDB Stateful Checkpointing Configuration
+  flinkConfiguration:
+    taskmanager.numberOfTaskSlots: "4"
+    parallelism.default: "2"
+    state.backend: rocksdb
+    state.checkpoints.dir: file:///opt/flink/state/checkpoints
+    state.savepoints.dir: file:///opt/flink/state/savepoints
+    execution.checkpointing.interval: "10s"
+    execution.checkpointing.min-pause: "5s"
+
+  # Application Mode Execution using Flinkflow Engine
+  job:
+    jarURI: local:///opt/flink/flinkflow.jar
+    entryClass: ai.talweg.flinkflow.FlinkflowApplication
+    args: ["/opt/flink/jobs/pipeline.yaml"]
+    parallelism: 2
+    upgradeMode: savepoint   # Stateful zero-downtime upgrades
+    state: running
+
+  # Resource Allocations for JobManager & TaskManager
+  jobManager:
+    resource:
+      memory: "1600m"
+      cpu: 1.0
+  taskManager:
+    resource:
+      memory: "2048m"
+      cpu: 1.5
+
+  podTemplate:
+    spec:
+      containers:
+        - name: flink-main-container
+          envFrom:
+            - secretRef:
+                name: flinkflow-secrets
+          volumeMounts:
+            - name: compiled-pipeline-volume
+              mountPath: /opt/flink/jobs
+            - name: flink-state-volume
+              mountPath: /opt/flink/state
+      volumes:
+        - name: compiled-pipeline-volume
+          configMap:
+            name: omop-ai-cdss-pipeline-cm
+        - name: flink-state-volume
+          emptyDir: {}

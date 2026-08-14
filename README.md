@@ -1,46 +1,34 @@
-# Flink Fintech POC
+# Flink Streaming & Data Infrastructure Platform
 
-The goal is to try build simple real-time pipeline with PostgreSQL, Kafka, Kafka Connect, Debezium and Flink. 
+Real-time streaming platform powered by **Apache Flink**, **Flinkflow (YAML DSL)**, **Apache Kafka**, **Confluent Schema Registry**, **PostgreSQL (CDC)**, and **ClickHouse**.
 
-## Project Structure
+## Quick Start & Running Pipelines
 
-- `docker/` - Docker Compose setup for PostgreSQL, Kafka, Kafka Connect (Debezium), and Kafka UI
-- `flinkfintechpoc/` - Original Flink example with a simple word count job
-- `flink-jobs/` - Flink jobs for real-time data processing
-
-## Flink Jobs
-
-### Customer Analytics Job
-
-This job reads from the `customers` Kafka topic and calculates the number of customers created per minute.
-
-#### How to Build
-
+### 1. Start Infrastructure
 ```bash
-cd flink-jobs
-mvn clean package
+mise run docker:start:flinkflow
 ```
 
-#### How to Run
-
-You can run the job using one of the following methods:
-
-1. Using Flink CLI:
+### 2. Submit Flinkflow Pipelines
+Submit stream processing pipelines defined in `flinkflow-jobs/`:
 ```bash
-flink run flink-jobs/target/flink-jobs-1.0-SNAPSHOT.jar
+# Run any YAML pipeline (e.g. Java, Python, SQL, Hybrid)
+mise run ff:run hybrid/omop/omop-vocab-mapping-demo
+
+# Or run interactively using the pipeline picker
+mise run ff:select
 ```
 
-2. Using mise task (recommended):
+### 3. Stream & Inspect Logs
 ```bash
-mise run flink-customer-analytics
+# Stream Flink TaskManager logs
+mise run flink:logs
+
+# Open Web UIs
+mise run open:flink-ui         # Flink Dashboard (port 8081)
+mise run open:kafka-ui         # Kafka UI (port 8080)
+mise run open:schema-registry  # Schema Registry (port 8084)
 ```
-This command will automatically build the jar and then run the Flink job.
-
-The job will connect to Kafka and start processing customer data in real-time, outputting the count of customers created per minute.
-
-#### Viewing Results
-
-You can view the job results in the Flink Dashboard at http://localhost:8081 after starting the job.
 
 ## Infrastructure Setup
 
@@ -78,7 +66,7 @@ This will open a psql session connected to the PostgreSQL instance running in Do
 All connection environment variables are centrally managed:
 
 ### Local Development (`env.local`)
-Local connection details and topic names are defined in [`env.local`](file:///t:/home/dmichael/0Talweg/OS/flink-kafka-infra/env.local), which is automatically loaded by `mise` (via `[env]` in `mise.toml`) and passed to `ff-jobmanager` / `ff-taskmanager` via `docker-compose.yml`:
+Local connection details and topic names are defined in [`env.local`](env.local), which is automatically loaded by `mise` (via `[env]` in `mise.toml`) and passed to `ff-jobmanager` / `ff-taskmanager` via `docker-compose.yml`:
 
 - `KAFKA_BOOTSTRAP_SERVERS`: `kafka:29092` (container) / `localhost:9092` (host)
 - `SCHEMA_REGISTRY_URL`: `http://schema-registry:8081`
@@ -87,3 +75,10 @@ Local connection details and topic names are defined in [`env.local`](file:///t:
 
 ### Production (Kubernetes Pattern)
 In Kubernetes deployments, variables are injected into Flinkflow pods via Secrets and ConfigMaps, and referenced in DSL YAMLs using standard placeholders (e.g., `${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}`) or `secret:secret-name/key`.
+
+## Schema Registry & Data Contracts
+
+All event streams are governed by formal schemas registered with **Confluent Schema Registry**:
+- See the complete developer guide: [`schemas/README.md`](schemas/README.md)
+- Register schemas: `mise run schema:register:omop`
+- Web UI: `http://localhost:8084/subjects` or via Kafka UI at `http://localhost:8080`

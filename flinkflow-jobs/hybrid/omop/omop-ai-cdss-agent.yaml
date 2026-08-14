@@ -1,0 +1,109 @@
+name: "OMOP AI CDSS Agent - Multi-Source Windowed Clinical Reasoning Pipeline"
+parallelism: 1
+
+# ==============================================================================
+# BUSINESS USE CASE: Real-Time Multi-Source OMOP Harmonization & AI CDSS
+# ==============================================================================
+# Clinical Problem:
+#   Heterogeneous streaming feeds (LOINC vitals, local LIS labs, NDC pharmacy,
+#   ICD-10-CM EHR diagnoses) produce fragmented, noisy alerts in acute ICU care.
+#
+# Modular Architecture:
+#   1. healthcare_datagen (datagen-source): 2 events/sec stream clock.
+#   2. generate_multi_source_feed (file: src/aidatagen.py): LLM/Persona generator.
+#   3. map_to_omop_concept (file: src/vocab_mapping.py): Dynamic OMOP harmonization.
+#   4. omop_standard_events_sink (kafka-sink): Raw standardized events topic.
+#   5. windowed_patient_state (file: sql/windowed_patient_state.sql): 10s Flink SQL TUMBLE.
+#   6. ai_cdss_agent (file: src/ai_cdss_agent.py): Google Gemini CDSS reasoning.
+#   7. omop_ai_alerts_sink (kafka-sink): Structured AI CDSS alerts topic.
+#   8. format_ai_console_card (file: src/console_card.py): Color-coded terminal card.
+#   9. console_sink (console-sink): Terminal stdout display.
+# ==============================================================================
+
+steps:
+  # 1. Base Stream Tick Generator
+  - type: source
+    name: healthcare_datagen
+    connector: datagen-source
+    properties:
+      rowsPerSecond: "2"
+
+  # 2. LLM-Powered Multi-Source Clinical Data Generator
+  - type: process
+    name: generate_multi_source_feed
+    language: python
+    inputs:
+      - healthcare_datagen
+    file: src/aidatagen.py
+
+  # 3. Dynamic OMOP Concept Harmonization (Port 8082 Lookup)
+  - type: process
+    name: map_to_omop_concept
+    language: python
+    inputs:
+      - generate_multi_source_feed
+    file: src/vocab_mapping.py
+
+  # 4. Kafka Sink: Standardized OMOP Events (Schema ID: 1)
+  - type: sink
+    name: omop_standard_events_sink
+    connector: kafka-sink
+    inputs:
+      - map_to_omop_concept
+    properties:
+      topic: "${OMOP_EVENTS_TOPIC:-omop-standard-events}"
+      bootstrap.servers: "${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}"
+
+  # 5. Flink SQL 10-Second Tumbling Window Aggregation
+  - type: sql
+    name: windowed_patient_state
+    inputs:
+      - map_to_omop_concept
+    properties:
+      schema.map_to_omop_concept.person_source_value: "string"
+      schema.map_to_omop_concept.source_name: "string"
+      schema.map_to_omop_concept.source_vocabulary: "string"
+      schema.map_to_omop_concept.source_code: "string"
+      schema.map_to_omop_concept.value: "string"
+      schema.map_to_omop_concept.value_num: "double"
+      schema.map_to_omop_concept.unit: "string"
+      schema.map_to_omop_concept.event_time: "timestamp"
+      schema.map_to_omop_concept.standard_concept_id: "int"
+      schema.map_to_omop_concept.standard_concept_name: "string"
+      schema.map_to_omop_concept.domain_id: "string"
+      watermark.map_to_omop_concept.column: "event_time"
+      watermark.map_to_omop_concept.delay: "2"
+    file: sql/windowed_patient_state.sql
+
+  # 6. Multi-Provider AI CDSS Agent (Google Gemini / Fallback Rules)
+  - type: process
+    name: ai_cdss_agent
+    language: python
+    inputs:
+      - windowed_patient_state
+    file: src/ai_cdss_agent.py
+
+  # 7. Kafka Sink: AI CDSS Diagnostic Alerts (Schema ID: 3)
+  - type: sink
+    name: omop_ai_alerts_sink
+    connector: kafka-sink
+    inputs:
+      - ai_cdss_agent
+    properties:
+      topic: "${OMOP_AI_ALERTS_TOPIC:-omop-cdss-ai-alerts}"
+      bootstrap.servers: "${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}"
+
+  # 8. Terminal Card Formatter
+  - type: process
+    name: format_ai_console_card
+    language: python
+    inputs:
+      - ai_cdss_agent
+    file: src/console_card.py
+
+  # 9. Console Stdout Sink
+  - type: sink
+    name: console_sink
+    connector: console-sink
+    inputs:
+      - format_ai_console_card
