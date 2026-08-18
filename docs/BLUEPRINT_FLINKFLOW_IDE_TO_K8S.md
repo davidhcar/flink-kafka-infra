@@ -438,29 +438,44 @@ This section embeds the full, working implementation code for all core scripts, 
   "title": "FlinkflowCoreOntology",
   "version": "1.2.0",
   "discovery_mode": "Zero-Hardcoding Dynamic Java AST Analysis",
-  "engine_source_files_scanned": 61,
+  "engine_source_files_scanned": 65,
   "entities": {
     "Step": {
       "types": [
         "agent",
         "aggregate",
+        "bigint",
         "bool",
         "boolean",
+        "char",
+        "console-sink",
         "datagen",
         "datagen-source",
         "datamapper",
         "date",
         "decimal",
         "double",
+        "file-sink",
+        "file-source",
         "filter",
         "flatmap",
         "float",
+        "flowlet",
+        "fluss-lookup",
+        "fluss-sink",
+        "fluss-source",
         "google",
         "groupby",
         "http-lookup",
+        "http-sink",
         "int",
         "integer",
+        "jdbc-sink",
         "join",
+        "kafka-avro-sink",
+        "kafka-avro-source",
+        "kafka-sink",
+        "kafka-source",
         "keyby",
         "long",
         "ml",
@@ -468,15 +483,22 @@ This section embeds the full, working implementation code for all core scripts, 
         "openai",
         "process",
         "reduce",
+        "s3-sink",
+        "s3-source",
         "sideoutput",
         "sink",
+        "smallint",
         "source",
         "sql",
+        "static-source",
         "string",
         "timestamp",
+        "tinyint",
         "transform",
+        "varchar",
         "vector",
         "vertex",
+        "webhook-sink",
         "window"
       ],
       "properties": {
@@ -489,23 +511,38 @@ This section embeds the full, working implementation code for all core scripts, 
           "enum": [
             "agent",
             "aggregate",
+            "bigint",
             "bool",
             "boolean",
+            "char",
+            "console-sink",
             "datagen",
             "datagen-source",
             "datamapper",
             "date",
             "decimal",
             "double",
+            "file-sink",
+            "file-source",
             "filter",
             "flatmap",
             "float",
+            "flowlet",
+            "fluss-lookup",
+            "fluss-sink",
+            "fluss-source",
             "google",
             "groupby",
             "http-lookup",
+            "http-sink",
             "int",
             "integer",
+            "jdbc-sink",
             "join",
+            "kafka-avro-sink",
+            "kafka-avro-source",
+            "kafka-sink",
+            "kafka-source",
             "keyby",
             "long",
             "ml",
@@ -513,15 +550,22 @@ This section embeds the full, working implementation code for all core scripts, 
             "openai",
             "process",
             "reduce",
+            "s3-sink",
+            "s3-source",
             "sideoutput",
             "sink",
+            "smallint",
             "source",
             "sql",
+            "static-source",
             "string",
             "timestamp",
+            "tinyint",
             "transform",
+            "varchar",
             "vector",
             "vertex",
+            "webhook-sink",
             "window"
           ],
           "required": true
@@ -546,12 +590,28 @@ This section embeds the full, working implementation code for all core scripts, 
         "connector": {
           "type": "string",
           "enum": [
-            "kafka",
-            "fluss",
-            "postgres",
+            "console",
+            "console-sink",
             "datagen",
+            "datagen-source",
             "file",
-            "console"
+            "file-sink",
+            "file-source",
+            "fluss",
+            "fluss-sink",
+            "fluss-source",
+            "http-sink",
+            "jdbc-sink",
+            "kafka",
+            "kafka-avro-sink",
+            "kafka-avro-source",
+            "kafka-sink",
+            "kafka-source",
+            "postgres",
+            "s3-sink",
+            "s3-source",
+            "static-source",
+            "webhook-sink"
           ]
         },
         "properties": {
@@ -578,17 +638,26 @@ This section embeds the full, working implementation code for all core scripts, 
         "optional_properties": [
           "properties.group.id",
           "scan.startup.mode",
+          "topic",
           "value.format"
         ]
       },
       "fluss": {
         "required_properties": [
-          "fluss.bootstrap.servers",
-          "table.name"
+          "bootstrap.servers",
+          "table"
         ],
         "optional_properties": [
+          "cacheSize",
+          "cacheTtlSec",
           "fluss.client.timeout",
-          "fluss.lakehouse.format"
+          "fluss.lakehouse.format",
+          "key",
+          "lookupKey",
+          "merge-engine",
+          "outputField",
+          "table",
+          "table.path"
         ]
       },
       "postgres": {
@@ -600,7 +669,8 @@ This section embeds the full, working implementation code for all core scripts, 
         ],
         "optional_properties": [
           "batch-size",
-          "driver"
+          "driver",
+          "sql"
         ]
       },
       "datagen": {
@@ -625,6 +695,30 @@ This section embeds the full, working implementation code for all core scripts, 
         "optional_properties": [
           "prefix"
         ]
+      },
+      "s3": {
+        "required_properties": [],
+        "optional_properties": []
+      },
+      "static": {
+        "required_properties": [],
+        "optional_properties": []
+      },
+      "kafka-avro": {
+        "required_properties": [],
+        "optional_properties": []
+      },
+      "http": {
+        "required_properties": [],
+        "optional_properties": []
+      },
+      "webhook": {
+        "required_properties": [],
+        "optional_properties": []
+      },
+      "jdbc": {
+        "required_properties": [],
+        "optional_properties": []
       }
     },
     "RuntimeEngines": {

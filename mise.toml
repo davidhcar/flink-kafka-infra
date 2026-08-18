@@ -32,8 +32,8 @@ docker compose -f docker/docker-compose.yml logs --tail=25 ff-taskmanager
 # ==============================================================================
 
 [tasks."ff-local:start"]
-description = "Start local Flinkflow Docker services (Kafka, Postgres, Schema Registry, Flink, Vocab Service)"
-run = "docker compose -f docker/docker-compose.yml up -d postgres kafka schema-registry kafka-connect kafka-ui ff-jobmanager ff-taskmanager vocab-service"
+description = "Start local Flinkflow Docker services (Kafka, Postgres, Schema Registry, Fluss, Flink, Vocab Service)"
+run = "docker compose -f docker/docker-compose.yml up -d postgres kafka schema-registry kafka-connect kafka-ui fluss-zookeeper fluss-coordinator fluss-tabletserver ff-jobmanager ff-taskmanager vocab-service"
 
 [tasks."ff-local:stop"]
 description = "Stop and remove all local Flinkflow Docker containers"
@@ -70,6 +70,10 @@ run = "cmd.exe /c start \"\" \"http://localhost:8082/health\" 2>/dev/null || pow
 [tasks."open:schema-registry"]
 description = "Open local Schema Registry web interface (port 8084)"
 run = "cmd.exe /c start \"\" \"http://localhost:8084/subjects\" 2>/dev/null || powershell.exe -NoProfile -Command \"Start-Process 'http://localhost:8084/subjects'\" 2>/dev/null || wslview \"http://localhost:8084/subjects\" 2>/dev/null || xdg-open \"http://localhost:8084/subjects\" 2>/dev/null || open \"http://localhost:8084/subjects\""
+
+[tasks."open:fluss-coordinator"]
+description = "Open local Fluss Coordinator endpoint (port 9123)"
+run = "cmd.exe /c start \"\" \"http://localhost:9123\" 2>/dev/null || powershell.exe -NoProfile -Command \"Start-Process 'http://localhost:9123'\" 2>/dev/null || wslview \"http://localhost:9123\" 2>/dev/null || xdg-open \"http://localhost:9123\" 2>/dev/null || open \"http://localhost:9123\""
 
 [tasks."open:langfuse"]
 description = "Open local Langfuse Web UI (port 4000)"
@@ -161,6 +165,11 @@ description = "Submit Hybrid pipeline to local JobManager (e.g. omop/omop-ai-cds
 usage = 'arg "<pipeline>" help="Pipeline YAML name"'
 run = 'mise run ff-local:run "hybrid/$usage_pipeline"'
 
+[tasks."ff-fluss:run"]
+description = "Submit Fluss pipeline to local JobManager (e.g. mise run ff-fluss:run dedup-stream)"
+usage = 'arg "<pipeline>" help="Pipeline YAML name under flinkflow-jobs/fluss/"'
+run = 'mise run ff-local:run "fluss/$usage_pipeline"'
+
 # ------------------------------------------------------------------------------
 # 2.4 Local Ephemeral Standalone MiniCluster (Zero Cluster Running)
 # ------------------------------------------------------------------------------
@@ -248,3 +257,12 @@ run = "python -m unittest discover -s flinkflow-jobs/hybrid/omop/tests -p \"test
 [tasks."postgres:connect"]
 description = "Connect to local PostgreSQL database (outbox_demo) using interactive psql client"
 run = "docker exec -it $(docker compose -f docker/docker-compose.yml ps -q postgres) psql -U postgres -d outbox_demo"
+
+[tasks."fluss:status"]
+description = "Check status of local Apache Fluss cluster (Coordinator & TabletServer)"
+run = "docker compose -f docker/docker-compose.yml ps fluss-coordinator fluss-tabletserver"
+
+[tasks."fluss:logs"]
+description = "Follow live logs from local Fluss cluster"
+run = "docker compose -f docker/docker-compose.yml logs -f --tail=50 fluss-coordinator fluss-tabletserver"
+

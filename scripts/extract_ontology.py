@@ -46,8 +46,17 @@ def extract_step_types(java_files: List[Path]) -> List[str]:
             if len(match) > 1 and not match.startswith("--"):
                 step_types.add(match.lower())
 
-        equals_matches = re.findall(r'(?:type|stepType)\.(?:equalsIgnoreCase|equals)\("([a-zA-Z0-9_\-]+)"\)', content)
+        equals_matches = re.findall(r'(?:type|stepType|step\.getType\(\))\.(?:equalsIgnoreCase|equals)\("([a-zA-Z0-9_\-]+)"\)', content)
         for match in equals_matches:
+            step_types.add(match.lower())
+
+        rev_equals_matches = re.findall(r'"([a-zA-Z0-9_\-]+)"\s*\.\s*(?:equalsIgnoreCase|equals)\s*\(\s*(?:type|stepType|step\.getType\(\))\s*\)', content)
+        for match in rev_equals_matches:
+            step_types.add(match.lower())
+
+        # Detect directional connector step types (e.g. fluss-source, fluss-sink, kafka-source, kafka-sink)
+        conn_dir_matches = re.findall(r'"([a-zA-Z0-9_\-]+-(?:source|sink))"\s*\.\s*(?:equalsIgnoreCase|equals)\s*\(\s*(?:sourceName|sinkName|connector|conn|normConnector)\s*\)', content)
+        for match in conn_dir_matches:
             step_types.add(match.lower())
 
     if not step_types:
@@ -78,34 +87,43 @@ def extract_languages(java_files: List[Path]) -> List[str]:
     return sorted(list(languages))
 
 
-def extract_connectors_and_properties(java_files: List[Path]) -> Dict[str, Any]:
+def extract_connectors_and_properties(java_files: List[Path]) -> tuple[Dict[str, Any], List[str]]:
     """Discovers all supported connectors (Kafka, Fluss, Postgres, Datagen, etc.) and their properties."""
     connectors: Dict[str, Dict[str, Set[str]]] = {
         "kafka": {"required": {"topic", "properties.bootstrap.servers"}, "optional": {"value.format", "properties.group.id", "scan.startup.mode"}},
-        "fluss": {"required": {"table.name", "fluss.bootstrap.servers"}, "optional": {"fluss.client.timeout", "fluss.lakehouse.format"}},
+        "fluss": {"required": {"table", "bootstrap.servers"}, "optional": {"key", "lookupKey", "outputField", "cacheTtlSec", "cacheSize", "merge-engine", "fluss.client.timeout", "fluss.lakehouse.format"}},
         "postgres": {"required": {"url", "table-name", "username", "password"}, "optional": {"driver", "batch-size"}},
         "datagen": {"required": set(), "optional": {"rows-per-second", "fields", "number-of-rows"}},
         "file": {"required": {"path"}, "optional": {"format", "rolling-policy"}},
         "console": {"required": set(), "optional": {"prefix"}}
     }
+    connector_enums: Set[str] = {"kafka", "fluss", "fluss-source", "fluss-sink", "postgres", "datagen", "file", "console"}
 
     for file_path in java_files:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
 
-        conn_matches = re.findall(r'(?:connector|conn)\.(?:equalsIgnoreCase|equals)\("([a-zA-Z0-9_\-]+)"\)', content)
+        conn_matches = re.findall(r'(?:connector|conn|sourceName|sinkName|normConnector)\.(?:equalsIgnoreCase|equals)\("([a-zA-Z0-9_\-]+)"\)', content)
         for conn in conn_matches:
+            connector_enums.add(conn.lower())
             conn_name = conn.lower().replace("-source", "").replace("-sink", "")
             if conn_name not in connectors:
                 connectors[conn_name] = {"required": set(), "optional": set()}
 
-        prop_matches = re.findall(r'properties\.(?:get|getOrDefault)\("([a-zA-Z0-9_\-\.]+)"', content)
+        conn_rev_matches = re.findall(r'"([a-zA-Z0-9_\-]+)"\s*\.\s*(?:equalsIgnoreCase|equals|startsWith)\s*\(\s*(?:connector|conn|sourceName|sinkName|normConnector)\s*\)', content)
+        for conn in conn_rev_matches:
+            connector_enums.add(conn.lower())
+            conn_name = conn.lower().replace("-source", "").replace("-sink", "")
+            if conn_name not in connectors:
+                connectors[conn_name] = {"required": set(), "optional": set()}
+
+        prop_matches = re.findall(r'(?:properties|props)\.(?:get|getOrDefault|containsKey)\("([a-zA-Z0-9_\-\.]+)"\)', content)
         for prop in prop_matches:
-            if "fluss" in prop:
+            if any(k in prop for k in ["fluss", "table", "merge-engine", "lookupKey", "outputField", "cacheTtlSec", "cacheSize"]):
                 connectors.setdefault("fluss", {"required": set(), "optional": set()})["optional"].add(prop)
             elif "kafka" in prop or "topic" in prop:
                 connectors.setdefault("kafka", {"required": set(), "optional": set()})["optional"].add(prop)
-            elif "postgres" in prop or "jdbc" in prop:
+            elif "postgres" in prop or "jdbc" in prop or "sql" in prop:
                 connectors.setdefault("postgres", {"required": set(), "optional": set()})["optional"].add(prop)
 
     formatted_connectors = {}
@@ -115,7 +133,7 @@ def extract_connectors_and_properties(java_files: List[Path]) -> Dict[str, Any]:
             "optional_properties": sorted(list(prop_dict["optional"]))
         }
 
-    return formatted_connectors
+    return formatted_connectors, sorted(list(connector_enums))
 
 
 def generate_ontology(engine_path: Path) -> Dict[str, Any]:
@@ -123,7 +141,7 @@ def generate_ontology(engine_path: Path) -> Dict[str, Any]:
     java_files = scan_all_java_files(engine_path)
     step_types = extract_step_types(java_files)
     languages = extract_languages(java_files)
-    connectors = extract_connectors_and_properties(java_files)
+    connectors, connector_enums = extract_connectors_and_properties(java_files)
 
     ontology = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -139,7 +157,7 @@ def generate_ontology(engine_path: Path) -> Dict[str, Any]:
                     "type": { "type": "string", "enum": step_types, "required": True },
                     "file": { "type": "string", "description": "Relative path to external code or SQL" },
                     "language": { "type": "string", "enum": languages },
-                    "connector": { "type": "string", "enum": list(connectors.keys()) },
+                    "connector": { "type": "string", "enum": connector_enums },
                     "properties": { "type": "object" },
                     "inputs": { "type": "array", "items": { "type": "string" } },
                     "with": { "type": "object", "description": "Parameters for flowlet expansion" }
