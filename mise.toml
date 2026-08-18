@@ -1,103 +1,90 @@
-# Project dependencies: java, maven, flink, lein
+# ==============================================================================
+# Flinkflow Local Development Taskfile (mise.toml)
+# Exclusively for Local Development & Testing (Zero K8s Dependencies)
+# Note: Staging & Production deployments are handled 100% via CI/CD pipelines.
+# ==============================================================================
 
-# -----------------------------------------------------------------------------
-# GLOBAL ENVIRONMENT CONFIGURATION
-# -----------------------------------------------------------------------------
+# ==============================================================================
+# 1. GLOBAL LOCAL CONFIGURATION & HEALTHCHECKS
+# ==============================================================================
 
 [env]
 _.file = "env.local"
 
-# -----------------------------------------------------------------------------
-# CORE & HEALTHCHECK TASKS
-# -----------------------------------------------------------------------------
+[tasks."ontology:sync"]
+description = "Extract and sync Flinkflow Core Ontology Knowledge Graph from Java engine into config/ontology.json"
+run = "python3 scripts/extract_ontology.py 2>/dev/null || python scripts/extract_ontology.py || py scripts/extract_ontology.py"
 
 [tasks."env:healthcheck"]
-description = "Validate all connection details and network targets from env.local"
+description = "Validate local connection details and network targets from env.local"
 run = "python3 scripts/env_healthcheck.py 2>/dev/null || python scripts/env_healthcheck.py || py scripts/env_healthcheck.py"
 
 [tasks."ff:healthcheck"]
-description = "Run Flinkflow Environment Healthcheck DSL Pipeline on cluster and display output"
+description = "Run Flinkflow Environment Healthcheck DSL Pipeline on local cluster"
 run = '''#!/usr/bin/env bash
-mise run ff:run python/env-healthcheck
+mise run ff-local:run python/env-healthcheck
 sleep 3
 docker compose -f docker/docker-compose.yml logs --tail=25 ff-taskmanager
 '''
 
-# -----------------------------------------------------------------------------
-# DOCKER INFRASTRUCTURE TASKS
-# -----------------------------------------------------------------------------
+# ==============================================================================
+# 2. LOCAL DOCKER INFRASTRUCTURE LIFECYCLE (ff-local:)
+# ==============================================================================
 
-[tasks."docker:start:langfuse"]
-description = "Start Langfuse and its dependencies (Postgres, Clickhouse, Minio, Redis)"
-run = "docker compose -f docker/docker-compose.yml up -d postgres clickhouse minio redis langfuse langfuse-worker"
-
-[tasks."docker:stop:langfuse"]
-description = "Stop and remove Langfuse and its private dependencies"
-run = "docker compose -f docker/docker-compose.yml stop clickhouse minio redis langfuse langfuse-worker && docker compose -f docker/docker-compose.yml rm -f clickhouse minio redis langfuse langfuse-worker"
-
-[tasks."docker:start:flinkflow"]
-description = "Start Flinkflow and its dependencies (Postgres, Kafka, Schema Registry, Connect, Flink, Vocab Service)"
+[tasks."ff-local:start"]
+description = "Start local Flinkflow Docker services (Kafka, Postgres, Schema Registry, Flink, Vocab Service)"
 run = "docker compose -f docker/docker-compose.yml up -d postgres kafka schema-registry kafka-connect kafka-ui ff-jobmanager ff-taskmanager vocab-service"
 
-[tasks."docker:stop:flinkflow"]
-description = "Stop and remove Flinkflow and its private dependencies"
-run = "docker compose -f docker/docker-compose.yml stop kafka schema-registry kafka-connect kafka-ui ff-jobmanager ff-taskmanager vocab-service && docker compose -f docker/docker-compose.yml rm -f kafka schema-registry kafka-connect kafka-ui ff-jobmanager ff-taskmanager vocab-service"
-
-[tasks."docker:stop:all"]
-description = "Stop and remove all running Docker containers including Postgres"
+[tasks."ff-local:stop"]
+description = "Stop and remove all local Flinkflow Docker containers"
 run = "docker compose -f docker/docker-compose.yml down --remove-orphans"
 
-[tasks."docker:ps"]
-description = "List status of all running Docker containers"
+[tasks."ff-local:status"]
+description = "List status of all running local Docker containers"
 run = "docker compose -f docker/docker-compose.yml ps"
 
-# -----------------------------------------------------------------------------
-# WEB INTERFACE UTILITIES (Cross-Platform Browser Launcher: WSL, Linux, macOS, Windows)
-# -----------------------------------------------------------------------------
+[tasks."ff-local:langfuse:start"]
+description = "Start local Langfuse observability stack (Postgres, Clickhouse, Minio, Redis)"
+run = "docker compose -f docker/docker-compose.yml up -d postgres clickhouse minio redis langfuse langfuse-worker"
+
+[tasks."ff-local:langfuse:stop"]
+description = "Stop local Langfuse observability stack"
+run = "docker compose -f docker/docker-compose.yml stop clickhouse minio redis langfuse langfuse-worker && docker compose -f docker/docker-compose.yml rm -f clickhouse minio redis langfuse langfuse-worker"
+
+# ------------------------------------------------------------------------------
+# 2.1 Local Web Interface Launchers (Browser Openers)
+# ------------------------------------------------------------------------------
 
 [tasks."open:kafka-ui"]
-description = "Open Kafka UI web interface in browser (port 8080)"
+description = "Open local Kafka UI web interface (port 8080)"
 run = "cmd.exe /c start \"\" \"http://localhost:8080\" 2>/dev/null || powershell.exe -NoProfile -Command \"Start-Process 'http://localhost:8080'\" 2>/dev/null || wslview \"http://localhost:8080\" 2>/dev/null || xdg-open \"http://localhost:8080\" 2>/dev/null || open \"http://localhost:8080\""
 
 [tasks."open:flink-ui"]
-description = "Open Flink Dashboard web interface in browser (port 8081)"
+description = "Open local Flink Dashboard web interface (port 8081)"
 run = "cmd.exe /c start \"\" \"http://localhost:8081\" 2>/dev/null || powershell.exe -NoProfile -Command \"Start-Process 'http://localhost:8081'\" 2>/dev/null || wslview \"http://localhost:8081\" 2>/dev/null || xdg-open \"http://localhost:8081\" 2>/dev/null || open \"http://localhost:8081\""
 
 [tasks."open:vocab-service"]
-description = "Open OMOP Vocabulary Service health check in browser (port 8082)"
+description = "Open local OMOP Vocabulary Service health check (port 8082)"
 run = "cmd.exe /c start \"\" \"http://localhost:8082/health\" 2>/dev/null || powershell.exe -NoProfile -Command \"Start-Process 'http://localhost:8082/health'\" 2>/dev/null || wslview \"http://localhost:8082/health\" 2>/dev/null || xdg-open \"http://localhost:8082/health\" 2>/dev/null || open \"http://localhost:8082/health\""
 
 [tasks."open:schema-registry"]
-description = "Open Schema Registry web interface in browser (port 8084)"
+description = "Open local Schema Registry web interface (port 8084)"
 run = "cmd.exe /c start \"\" \"http://localhost:8084/subjects\" 2>/dev/null || powershell.exe -NoProfile -Command \"Start-Process 'http://localhost:8084/subjects'\" 2>/dev/null || wslview \"http://localhost:8084/subjects\" 2>/dev/null || xdg-open \"http://localhost:8084/subjects\" 2>/dev/null || open \"http://localhost:8084/subjects\""
 
 [tasks."open:langfuse"]
-description = "Open Langfuse Web UI in browser (port 4000)"
+description = "Open local Langfuse Web UI (port 4000)"
 run = "cmd.exe /c start \"\" \"http://localhost:4000\" 2>/dev/null || powershell.exe -NoProfile -Command \"Start-Process 'http://localhost:4000'\" 2>/dev/null || wslview \"http://localhost:4000\" 2>/dev/null || xdg-open \"http://localhost:4000\" 2>/dev/null || open \"http://localhost:4000\""
 
 [tasks."open:minio"]
-description = "Open MinIO Console in browser (port 9001)"
+description = "Open local MinIO Console (port 9001)"
 run = "cmd.exe /c start \"\" \"http://localhost:9001\" 2>/dev/null || powershell.exe -NoProfile -Command \"Start-Process 'http://localhost:9001'\" 2>/dev/null || wslview \"http://localhost:9001\" 2>/dev/null || xdg-open \"http://localhost:9001\" 2>/dev/null || open \"http://localhost:9001\""
 
-# -----------------------------------------------------------------------------
-# FLINK NATIVE JOBS TASKS
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# 2.2 Local Pipeline Execution (Docker Cluster)
+# ------------------------------------------------------------------------------
 
-[tasks."flink:logs"]
-description = "Display FlinkFlow TaskManager logs in follow mode"
-run = "docker compose -f docker/docker-compose.yml logs -f --tail=50 ff-taskmanager"
-
-[tasks."flink:build"]
-description = "Build Flink Jobs JAR package using Maven"
-run = "cd flink-jobs && mvn clean package"
-
-[tasks."flink:run:word-count"]
-depends = ["flink:build"]
-description = "Run Word Count job that processes static text data and counts word occurrences"
-run = "flink run -c flinkfintechpoc.jobs.WordCountJob flink-jobs/target/flink-jobs-1.0-SNAPSHOT.jar"
-
-[tasks."flink:jobs:cancel"]
-description = "Cancel all running Flink jobs and fast-reset TaskManager"
+[tasks."ff-local:cancel"]
+description = "Cancel all running Flink jobs on local Docker cluster"
 run = '''
 docker compose -f docker/docker-compose.yml exec -T ff-jobmanager sh -c '
   jobs=$(flink list -r 2>/dev/null | grep -Eo "[0-9a-f]{32}")
@@ -108,14 +95,10 @@ docker compose -f docker/docker-compose.yml exec -T ff-jobmanager sh -c '
 docker compose -f docker/docker-compose.yml restart -t 1 ff-taskmanager
 '''
 
-# -----------------------------------------------------------------------------
-# FLINKFLOW UNIFIED CLUSTER RUNNER (Single Source of Truth)
-# -----------------------------------------------------------------------------
-
-[tasks."ff:run"]
-depends = ["flink:jobs:cancel"]
-description = "Submit any YAML pipeline to JobManager cluster by path (e.g. java/uppercase, python/datetime, hybrid/omop/...)"
-usage = 'arg "<pipeline>" help="Pipeline path relative to flinkflow-jobs"'
+[tasks."ff-local:run"]
+depends = ["ff-local:cancel"]
+description = "Submit any YAML pipeline to local Docker JobManager (e.g. mise run ff-local:run sql/interval-join)"
+usage = 'arg "<pipeline>" help="Pipeline path relative to flinkflow-jobs (e.g. sql/interval-join, hybrid/omop/omop-ai-cdss-agent)"'
 run = '''#!/usr/bin/env bash
 file="${usage_pipeline?}"
 [[ "$file" != *.yaml && "$file" != *.yml ]] && file="${file}.yaml"
@@ -129,8 +112,12 @@ docker compose -f docker/docker-compose.yml exec -T ff-jobmanager \
 	"/opt/flink/flinkflow-jobs/.rendered/${file}"
 '''
 
-[tasks."ff:list"]
-description = "List FlinkFlow YAML pipelines and select one to run"
+[tasks."ff-local:logs"]
+description = "Follow live logs from local Flink TaskManager container"
+run = "docker compose -f docker/docker-compose.yml logs -f --tail=50 ff-taskmanager"
+
+[tasks."ff-local:list"]
+description = "List all local FlinkFlow YAML pipelines and select one to run interactively"
 run = '''#!/usr/bin/env bash
 pipelines=$(find flinkflow-jobs -type f \( -name '*.yaml' -o -name '*.yml' \) | sort)
 [ -z "$pipelines" ] && { echo "No pipelines found in flinkflow-jobs" >&2; exit 1; }
@@ -147,59 +134,39 @@ else
 fi
 
 [ -z "$pipeline" ] && exit 0
-mise run ff:run "$pipeline"
+mise run ff-local:run "$pipeline"
 '''
 
-# -----------------------------------------------------------------------------
-# RUNNER SHORTCUTS (Delegates to ff:run)
-# -----------------------------------------------------------------------------
-
-[tasks."ff-java:cluster"]
-description = "Submit Java YAML pipeline to JobManager cluster"
-usage = 'arg "<pipeline>" help="Pipeline YAML file (e.g. uppercase)"'
-run = 'mise run ff:run "java/$usage_pipeline"'
+# ------------------------------------------------------------------------------
+# 2.3 Local Language-Specific Shortcuts
+# ------------------------------------------------------------------------------
 
 [tasks."ff-java:run"]
-description = "Submit Java YAML pipeline to JobManager (alias for ff-java:cluster)"
-usage = 'arg "<pipeline>" help="Pipeline YAML file (e.g. uppercase)"'
-run = 'mise run ff:run "java/$usage_pipeline"'
-
-[tasks."ff-py:cluster"]
-description = "Submit Python YAML pipeline to JobManager cluster"
-usage = 'arg "<pipeline>" help="Pipeline YAML file (e.g. datetime)"'
-run = 'mise run ff:run "python/$usage_pipeline"'
+description = "Submit Java pipeline to local JobManager (e.g. uppercase)"
+usage = 'arg "<pipeline>" help="Pipeline YAML name"'
+run = 'mise run ff-local:run "java/$usage_pipeline"'
 
 [tasks."ff-py:run"]
-description = "Submit Python YAML pipeline to JobManager (alias for ff-py:cluster)"
-usage = 'arg "<pipeline>" help="Pipeline YAML file (e.g. datetime)"'
-run = 'mise run ff:run "python/$usage_pipeline"'
-
-[tasks."ff-sql:cluster"]
-description = "Submit SQL YAML pipeline to JobManager cluster"
-usage = 'arg "<pipeline>" help="Pipeline YAML file (e.g. interval-join)"'
-run = 'mise run ff:run "sql/$usage_pipeline"'
+description = "Submit Python pipeline to local JobManager (e.g. datetime)"
+usage = 'arg "<pipeline>" help="Pipeline YAML name"'
+run = 'mise run ff-local:run "python/$usage_pipeline"'
 
 [tasks."ff-sql:run"]
-description = "Submit SQL YAML pipeline to JobManager (alias for ff-sql:cluster)"
-usage = 'arg "<pipeline>" help="Pipeline YAML file (e.g. interval-join)"'
-run = 'mise run ff:run "sql/$usage_pipeline"'
-
-[tasks."ff-hybrid:cluster"]
-description = "Submit Hybrid YAML pipeline to JobManager cluster"
-usage = 'arg "<pipeline>" help="Pipeline YAML file (e.g. omop/omop-vocab-mapping-demo)"'
-run = 'mise run ff:run "hybrid/$usage_pipeline"'
+description = "Submit SQL pipeline to local JobManager (e.g. interval-join)"
+usage = 'arg "<pipeline>" help="Pipeline YAML name"'
+run = 'mise run ff-local:run "sql/$usage_pipeline"'
 
 [tasks."ff-hybrid:run"]
-description = "Submit Hybrid YAML pipeline to JobManager (alias for ff-hybrid:cluster)"
-usage = 'arg "<pipeline>" help="Pipeline YAML file (e.g. omop/omop-vocab-mapping-demo)"'
-run = 'mise run ff:run "hybrid/$usage_pipeline"'
+description = "Submit Hybrid pipeline to local JobManager (e.g. omop/omop-ai-cdss-agent)"
+usage = 'arg "<pipeline>" help="Pipeline YAML name"'
+run = 'mise run ff-local:run "hybrid/$usage_pipeline"'
 
-# -----------------------------------------------------------------------------
-# LOCAL RUNNERS (Ephemeral Container / MiniCluster with spinner)
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# 2.4 Local Ephemeral Standalone MiniCluster (Zero Cluster Running)
+# ------------------------------------------------------------------------------
 
-[tasks."ff:local"]
-description = "Run any YAML pipeline in a local standalone container (MiniCluster)"
+[tasks."ff-local:minicluster"]
+description = "Run any YAML pipeline in an ephemeral standalone container (MiniCluster)"
 usage = 'arg "<pipeline>" help="Pipeline path relative to flinkflow-jobs (e.g. java/uppercase, python/datetime)"'
 run = '''#!/usr/bin/env bash
 pipeline="${usage_pipeline?}"
@@ -240,53 +207,25 @@ docker run --rm --network host $env_flag -v "$(pwd)/flinkflow-jobs/.rendered/${p
 }
 '''
 
-[tasks."ff-java:local"]
-description = "Run Java YAML pipeline in a local standalone container"
-usage = 'arg "<pipeline>" help="Pipeline YAML file (e.g. uppercase)"'
-run = 'mise run ff:local "java/$usage_pipeline"'
-
-[tasks."ff-py:local"]
-description = "Run Python YAML pipeline in a local standalone container"
-usage = 'arg "<pipeline>" help="Pipeline YAML file (e.g. datetime)"'
-run = 'mise run ff:local "python/$usage_pipeline"'
-
-[tasks."ff-sql:local"]
-description = "Run SQL YAML pipeline in a local standalone container"
-usage = 'arg "<pipeline>" help="Pipeline YAML file (e.g. interval-join)"'
-run = 'mise run ff:local "sql/$usage_pipeline"'
-
-[tasks."ff-hybrid:local"]
-description = "Run Hybrid YAML pipeline in a local standalone container"
-usage = 'arg "<pipeline>" help="Pipeline YAML file (e.g. omop/omop-vocab-mapping-demo)"'
-run = 'mise run ff:local "hybrid/$usage_pipeline"'
-
-# -----------------------------------------------------------------------------
-# SCHEMA REGISTRY UTILITIES
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# 2.5 Local Testing & Database Utilities
+# ------------------------------------------------------------------------------
 
 [tasks."schema:register:all"]
-description = "Automatically discover and register all schemas in schemas/ directory with Schema Registry"
+description = "Register all schemas in schemas/ directory with local Schema Registry"
 run = "python3 scripts/register_schemas.py 2>/dev/null || python scripts/register_schemas.py || py scripts/register_schemas.py"
 
 [tasks."schema:register"]
-description = "Register a specific schema file or pattern (e.g. mise run schema:register 'omop*')"
+description = "Register a specific schema file with local Schema Registry"
 usage = 'arg "<target>" help="Schema file path or pattern in schemas/"'
 run = 'python3 scripts/register_schemas.py "$usage_target" 2>/dev/null || python scripts/register_schemas.py "$usage_target" || py scripts/register_schemas.py "$usage_target"'
 
-[tasks."schema:register:omop"]
-description = "Register OMOP event and alert schemas with Confluent Schema Registry"
-run = 'mise run schema:register "omop*"'
-
 [tasks."schema:list"]
-description = "List all registered subjects from Confluent Schema Registry"
+description = "List all registered subjects from local Schema Registry"
 run = "curl -s ${SCHEMA_REGISTRY_URL_LOCAL:-http://localhost:8084}/subjects | jq . 2>/dev/null || curl -s ${SCHEMA_REGISTRY_URL_LOCAL:-http://localhost:8084}/subjects"
 
-# -----------------------------------------------------------------------------
-# OHDSI OMOP DEMO HELPER ALIASES
-# -----------------------------------------------------------------------------
-
 [tasks."kafka:reset:omop"]
-description = "Purge and recreate Kafka topics omop-standard-events, omop-clinical-alerts, and omop-cdss-ai-alerts"
+description = "Purge and recreate local Kafka OMOP topics"
 run = '''
 docker compose -f docker/docker-compose.yml exec -T kafka sh -c '
   kafka-topics --bootstrap-server ${KAFKA_BOOTSTRAP_SERVERS_LOCAL:-localhost:9092} --delete --topic ${OMOP_EVENTS_TOPIC:-omop-standard-events} 2>/dev/null || true
@@ -298,76 +237,14 @@ docker compose -f docker/docker-compose.yml exec -T kafka sh -c '
 '
 '''
 
-[tasks."omop:consume:alerts"]
-description = "Stream live clinical alerts directly from Kafka topic omop-clinical-alerts"
-run = "docker compose -f docker/docker-compose.yml exec -T kafka kafka-console-consumer --bootstrap-server ${KAFKA_BOOTSTRAP_SERVERS_LOCAL:-localhost:9092} --topic ${OMOP_ALERTS_TOPIC:-omop-clinical-alerts}"
-
 [tasks."omop:consume:ai-alerts"]
-description = "Stream live AI CDSS diagnostic alerts directly from Kafka topic omop-cdss-ai-alerts"
+description = "Stream live AI CDSS diagnostic alerts from local Kafka"
 run = "docker compose -f docker/docker-compose.yml exec -T kafka kafka-console-consumer --bootstrap-server ${KAFKA_BOOTSTRAP_SERVERS_LOCAL:-localhost:9092} --topic ${OMOP_AI_ALERTS_TOPIC:-omop-cdss-ai-alerts}"
 
-[tasks."omop:consume:events"]
-description = "Stream live standardized OMOP events directly from Kafka topic omop-standard-events"
-run = "docker compose -f docker/docker-compose.yml exec -T kafka kafka-console-consumer --bootstrap-server ${KAFKA_BOOTSTRAP_SERVERS_LOCAL:-localhost:9092} --topic ${OMOP_EVENTS_TOPIC:-omop-standard-events}"
-
-[tasks."omop:run-demo"]
-depends = ["schema:register:omop", "kafka:reset:omop"]
-description = "Run the hybrid inline datagen OMOP Vocab Mapping pipeline (auto-registers schemas, clears Kafka topic, and runs pipeline)"
-run = '''
-mise run ff:run hybrid/omop/omop-vocab-mapping-demo
-echo "Streaming live clinical alerts (Press Ctrl+C to exit log stream)..."
-mise run flink:logs
-'''
-
-[tasks."omop:run-ai-demo"]
-depends = ["schema:register:omop", "kafka:reset:omop"]
-description = "Run the AI CDSS Agent OMOP streaming pipeline with Google Gemini / LLM reasoning (auto-registers schemas and resets Kafka)"
-run = '''
-mise run ff:run hybrid/omop/omop-ai-cdss-agent
-echo "Streaming live AI CDSS assessments (Press Ctrl+C to exit log stream)..."
-mise run flink:logs
-'''
-
 [tasks."test:omop"]
-description = "Run comprehensive unit test suite for modular OMOP AI CDSS pipeline"
+description = "Run local Python unit test suite for OMOP pipeline"
 run = "python -m unittest discover -s flinkflow-jobs/hybrid/omop/tests -p \"test_*.py\" -v"
 
-# -----------------------------------------------------------------------------
-# KUBERNETES & APACHE FLINK OPERATOR (Production GitOps Lifecycle)
-# -----------------------------------------------------------------------------
-
-[tasks."k8s:init"]
-description = "Initialize cert-manager and Apache Flink Kubernetes Operator in WSL/Kubernetes"
-run = "bash scripts/k8s_setup_wsl.sh"
-
-[tasks."k8s:deploy:omop"]
-description = "Compile modular DAG, update ConfigMap & Secrets, and submit FlinkDeployment to Flink Operator"
-run = "bash scripts/deploy_k8s.sh"
-
-[tasks."k8s:status"]
-description = "Check status of Flink deployments and pods in flink-production namespace"
-run = "kubectl get flinkdeployment,pods,svc -n flink-production -o wide"
-
-[tasks."k8s:logs"]
-description = "Tail live logs from the Flink JobManager pod in Kubernetes"
-run = "kubectl logs -n flink-production -l app.kubernetes.io/name=omop-ai-cdss-pipeline -c flink-main-container -f"
-
-[tasks."k8s:ui"]
-description = "Port-forward Flink Web Dashboard from Kubernetes to http://localhost:8081"
-run = "kubectl port-forward -n flink-production svc/omop-ai-cdss-pipeline-rest 8081:8081"
-
-# -----------------------------------------------------------------------------
-# OTHER DATABASE & SIMULATION HELPERS
-# -----------------------------------------------------------------------------
-
-[tasks."connectors:register"]
-description = "Register Debezium Kafka Connectors for CDC data capture"
-run = "cd app && lein run -m flinkfintechpoc.connectors/register-connectors!"
-
-[tasks."simulate"]
-description = "Run Clojure event simulator"
-run = "cd app && lein run"
-
 [tasks."postgres:connect"]
-description = "Connect to PostgreSQL database (outbox_demo) using interactive psql client"
+description = "Connect to local PostgreSQL database (outbox_demo) using interactive psql client"
 run = "docker exec -it $(docker compose -f docker/docker-compose.yml ps -q postgres) psql -U postgres -d outbox_demo"

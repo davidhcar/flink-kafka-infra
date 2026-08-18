@@ -1,17 +1,17 @@
 # ==============================================================================
-# Flinkflow Kubernetes Production Deployment Manifest
-# Official Standard: https://talwegai.github.io/flinkflow/DEPLOY_K8S
+# Flinkflow Generic Kubernetes Deployment Template
+# Dynamically compiled per streaming project/pipeline
 # Managed by: Apache Flink Kubernetes Operator (FlinkDeployment CRD)
 # ==============================================================================
 apiVersion: flink.apache.org/v1beta1
 kind: FlinkDeployment
 metadata:
-  name: omop-ai-cdss-pipeline
-  namespace: flink-production
+  name: ${DEPLOYMENT_NAME}
+  namespace: ${NAMESPACE}
   labels:
-    app.kubernetes.io/name: omop-ai-cdss-pipeline
+    app.kubernetes.io/name: ${DEPLOYMENT_NAME}
     app.kubernetes.io/part-of: flinkflow
-    pipeline: omop-ai-cdss
+    pipeline: ${PIPELINE_NAME}
 spec:
   image: ghcr.io/talwegai/flinkflow:latest
   imagePullPolicy: IfNotPresent
@@ -22,10 +22,13 @@ spec:
     taskmanager.numberOfTaskSlots: "4"
     parallelism.default: "2"
     state.backend: rocksdb
+    state.backend.incremental: "true"
     state.checkpoints.dir: file:///opt/flink/state/checkpoints
     state.savepoints.dir: file:///opt/flink/state/savepoints
     execution.checkpointing.interval: "10s"
     execution.checkpointing.min-pause: "5s"
+    execution.checkpointing.mode: EXACTLY_ONCE
+    execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
 
   # Application Mode Execution using Flinkflow Engine
   job:
@@ -63,6 +66,6 @@ spec:
       volumes:
         - name: compiled-pipeline-volume
           configMap:
-            name: omop-ai-cdss-pipeline-cm
+            name: ${CONFIGMAP_NAME}
         - name: flink-state-volume
           emptyDir: {}

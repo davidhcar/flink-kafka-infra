@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FlinkflowCoreOntology",
+  "version": "1.2.0",
+  "discovery_mode": "Zero-Hardcoding Dynamic Java AST Analysis",
+  "engine_source_files_scanned": 61,
+  "entities": {
+    "Step": {
+      "types": [
+        "agent",
+        "aggregate",
+        "bool",
+        "boolean",
+        "datagen",
+        "datagen-source",
+        "datamapper",
+        "date",
+        "decimal",
+        "double",
+        "filter",
+        "flatmap",
+        "float",
+        "google",
+        "groupby",
+        "http-lookup",
+        "int",
+        "integer",
+        "join",
+        "keyby",
+        "long",
+        "ml",
+        "ollama",
+        "openai",
+        "process",
+        "reduce",
+        "sideoutput",
+        "sink",
+        "source",
+        "sql",
+        "string",
+        "timestamp",
+        "transform",
+        "vector",
+        "vertex",
+        "window"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "required": true
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "agent",
+            "aggregate",
+            "bool",
+            "boolean",
+            "datagen",
+            "datagen-source",
+            "datamapper",
+            "date",
+            "decimal",
+            "double",
+            "filter",
+            "flatmap",
+            "float",
+            "google",
+            "groupby",
+            "http-lookup",
+            "int",
+            "integer",
+            "join",
+            "keyby",
+            "long",
+            "ml",
+            "ollama",
+            "openai",
+            "process",
+            "reduce",
+            "sideoutput",
+            "sink",
+            "source",
+            "sql",
+            "string",
+            "timestamp",
+            "transform",
+            "vector",
+            "vertex",
+            "window"
+          ],
+          "required": true
+        },
+        "file": {
+          "type": "string",
+          "description": "Relative path to external code or SQL"
+        },
+        "language": {
+          "type": "string",
+          "enum": [
+            "camel",
+            "camel-groovy",
+            "camel-jsonpath",
+            "camel-simple",
+            "camel-yaml",
+            "groovy",
+            "jsonpath",
+            "python"
+          ]
+        },
+        "connector": {
+          "type": "string",
+          "enum": [
+            "kafka",
+            "fluss",
+            "postgres",
+            "datagen",
+            "file",
+            "console"
+          ]
+        },
+        "properties": {
+          "type": "object"
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "with": {
+          "type": "object",
+          "description": "Parameters for flowlet expansion"
+        }
+      }
+    },
+    "Connectors": {
+      "kafka": {
+        "required_properties": [
+          "properties.bootstrap.servers",
+          "topic"
+        ],
+        "optional_properties": [
+          "properties.group.id",
+          "scan.startup.mode",
+          "value.format"
+        ]
+      },
+      "fluss": {
+        "required_properties": [
+          "fluss.bootstrap.servers",
+          "table.name"
+        ],
+        "optional_properties": [
+          "fluss.client.timeout",
+          "fluss.lakehouse.format"
+        ]
+      },
+      "postgres": {
+        "required_properties": [
+          "password",
+          "table-name",
+          "url",
+          "username"
+        ],
+        "optional_properties": [
+          "batch-size",
+          "driver"
+        ]
+      },
+      "datagen": {
+        "required_properties": [],
+        "optional_properties": [
+          "fields",
+          "number-of-rows",
+          "rows-per-second"
+        ]
+      },
+      "file": {
+        "required_properties": [
+          "path"
+        ],
+        "optional_properties": [
+          "format",
+          "rolling-policy"
+        ]
+      },
+      "console": {
+        "required_properties": [],
+        "optional_properties": [
+          "prefix"
+        ]
+      }
+    },
+    "RuntimeEngines": {
+      "python": {
+        "engine": "GraalVM Python",
+        "entrypoint_pattern": "def process(input):"
+      },
+      "java": {
+        "engine": "Janino Runtime Compiler",
+        "interface": "MapFunction<String, String>"
+      },
+      "sql": {
+        "engine": "Apache Flink StreamTableEnvironment",
+        "watermark_required_for_windows": true
+      },
+      "fluss": {
+        "engine": "Apache Fluss Real-Time Lakehouse Storage & Streaming Tier",
+        "supports_streaming_read_write": true
+      }
+    }
+  }
+}

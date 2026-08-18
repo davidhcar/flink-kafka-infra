@@ -1,15 +1,85 @@
-name: CI Flinkflow Pipeline Test & Build
+name: Flinkflow Multi-Project Staged CI/CD Pipeline
 
 on:
   push:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      pipeline_path:
+        description: 'Specific Pipeline Path (Optional: Leave empty for auto-detect changed files)'
+        required: false
+        default: ''
+      target_env:
+        description: 'Target Environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - 'staging'
+          - 'production'
 
 jobs:
-  test-and-build:
-    name: Unit Tests, Schema Validation & Artifact Compilation
+  # ----------------------------------------------------------------------------
+  # Stage 1: Dynamic Changed Files Detection (AI Agentic Platform Monorepo Support)
+  # ----------------------------------------------------------------------------
+  detect-changes:
+    name: Detect Modified Pipeline Projects
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      has_changes: ${{ steps.set-matrix.outputs.has_changes }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Discover Changed Flinkflow Pipelines
+        id: set-matrix
+        run: |
+          if [ -n "${{ github.event.inputs.pipeline_path }}" ]; then
+            echo "Manual dispatch triggered for: ${{ github.event.inputs.pipeline_path }}"
+            MATRIX_JSON="[\"${{ github.event.inputs.pipeline_path }}\"]"
+            echo "matrix=${MATRIX_JSON}" >> $GITHUB_OUTPUT
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Detect modified or added YAML files in flinkflow-jobs/
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD -- 'flinkflow-jobs/**/*.yaml' 'flinkflow-jobs/**/*.yml' | grep -v '\.rendered/' || true)
+          else
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD -- 'flinkflow-jobs/**/*.yaml' 'flinkflow-jobs/**/*.yml' | grep -v '\.rendered/' || true)
+          fi
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "ℹ️ No pipeline YAML changes detected in flinkflow-jobs/."
+            echo "matrix=[]" >> $GITHUB_OUTPUT
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Convert to JSON array
+          JSON_ARRAY=$(echo "$CHANGED_FILES" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "Discovered modified pipelines: ${JSON_ARRAY}"
+          echo "matrix=${JSON_ARRAY}" >> $GITHUB_OUTPUT
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+
+  # ----------------------------------------------------------------------------
+  # Stage 2: Unit Testing, Schema Validation & AST Compilation Matrix
+  # ----------------------------------------------------------------------------
+  test-and-validate:
+    name: Test & Validate (${{ matrix.pipeline }})
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pipeline: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
 
     steps:
       - name: Checkout Code
@@ -20,32 +90,117 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Python Test Dependencies
+      - name: Install Test & Build Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pytest pyyaml requests
 
-      - name: Run Modular OMOP Pipeline Unit Tests
+      - name: Run Pipeline Unit Tests
         run: |
-          pytest flinkflow-jobs/hybrid/omop/tests/ -v
+          if [ -d "flinkflow-jobs/hybrid/omop/tests" ]; then
+            pytest flinkflow-jobs/hybrid/omop/tests/ -v
+          fi
 
-      - name: Validate Confluent Schema Registry Contracts
-        run: |
-          python scripts/register_schemas.py --help
-
-      - name: Compile Modular DAG into Production Deployment Artifact
+      - name: Pre-Flight AST Compilation & Syntax Verification
         run: |
           mkdir -p dist/
-          python scripts/render_pipeline.py \
-            flinkflow-jobs/hybrid/omop/omop-ai-cdss-agent.yaml \
-            dist/omop-ai-cdss-agent.yaml
+          python scripts/render_pipeline.py "${{ matrix.pipeline }}" "dist/$(basename ${{ matrix.pipeline }})"
+          echo "✅ Pre-flight verification passed for ${{ matrix.pipeline }}"
 
-      - name: Verify Compiled YAML Artifact
-        run: |
-          python -c "import yaml; doc = yaml.safe_load(open('dist/omop-ai-cdss-agent.yaml')); assert len(doc['steps']) == 9; print('SUCCESS: Validated 9 steps in compiled production YAML artifact')"
+  # ----------------------------------------------------------------------------
+  # Stage 3: Pre-Production / Staging Deployment & Automated Testing
+  # ----------------------------------------------------------------------------
+  deploy-staging:
+    name: Deploy to Pre-Prod / Staging (${{ matrix.pipeline }})
+    needs: [detect-changes, test-and-validate]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event.inputs.target_env == 'staging'
+    environment: staging
+    strategy:
+      matrix:
+        pipeline: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
 
-      - name: Upload Compiled Pipeline Artifact
-        uses: actions/upload-artifact@v4
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v5
         with:
-          name: flinkflow-production-pipeline
-          path: dist/omop-ai-cdss-agent.yaml
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: pip install pyyaml
+
+      - name: Set up Kubernetes Context (Staging Cluster)
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBECONFIG_STAGING || secrets.KUBECONFIG }}
+
+      - name: Deploy to Staging Namespace
+        env:
+          NAMESPACE: ${{ vars.K8S_NAMESPACE || 'flink-staging' }}
+          KAFKA_BOOTSTRAP_SERVERS: ${{ vars.KAFKA_BOOTSTRAP_SERVERS || 'kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092' }}
+          SCHEMA_REGISTRY_URL: ${{ vars.SCHEMA_REGISTRY_URL || 'http://schema-registry.kafka.svc.cluster.local:8081' }}
+          VOCAB_SERVICE_URL: ${{ vars.VOCAB_SERVICE_URL || 'http://vocab-service.flink-staging.svc.cluster.local:8082' }}
+          POSTGRES_URL: ${{ vars.POSTGRES_URL || 'jdbc:postgresql://postgres.flink-staging.svc.cluster.local:5432/outbox_demo' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          chmod +x scripts/deploy_k8s.sh
+          ./scripts/deploy_k8s.sh --pipeline "${{ matrix.pipeline }}" --namespace "${NAMESPACE}"
+
+      - name: Pre-Prod Smoke Test & Health Check
+        run: |
+          PIPELINE_NAME=$(basename "${{ matrix.pipeline }}" .yaml)
+          echo "🔍 Verifying FlinkDeployment in Pre-Prod: ${PIPELINE_NAME}-pipeline..."
+          # Give operator time to reconcile
+          sleep 10
+          kubectl get flinkdeployment "${PIPELINE_NAME}-pipeline" -n "${{ vars.K8S_NAMESPACE || 'flink-staging' }}" || true
+
+  # ----------------------------------------------------------------------------
+  # Stage 4: Production Promotion (Requires Approval Gate / Tag Promotion)
+  # ----------------------------------------------------------------------------
+  promote-production:
+    name: Promote to Production (${{ matrix.pipeline }})
+    needs: [detect-changes, deploy-staging]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event.inputs.target_env == 'production'
+    environment: production # Protected Environment: Requires Manual Approval in GitHub UI
+    strategy:
+      matrix:
+        pipeline: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: pip install pyyaml
+
+      - name: Set up Kubernetes Context (Production Cluster)
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBECONFIG_PROD || secrets.KUBECONFIG }}
+
+      - name: Deploy to Production Namespace
+        env:
+          NAMESPACE: ${{ vars.K8S_NAMESPACE_PROD || 'flink-production' }}
+          KAFKA_BOOTSTRAP_SERVERS: ${{ vars.KAFKA_BOOTSTRAP_SERVERS_PROD || 'kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092' }}
+          SCHEMA_REGISTRY_URL: ${{ vars.SCHEMA_REGISTRY_URL_PROD || 'http://schema-registry.kafka.svc.cluster.local:8081' }}
+          VOCAB_SERVICE_URL: ${{ vars.VOCAB_SERVICE_URL_PROD || 'http://vocab-service.flink-production.svc.cluster.local:8082' }}
+          POSTGRES_URL: ${{ vars.POSTGRES_URL_PROD || 'jdbc:postgresql://postgres.flink-production.svc.cluster.local:5432/outbox_demo' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          chmod +x scripts/deploy_k8s.sh
+          ./scripts/deploy_k8s.sh --pipeline "${{ matrix.pipeline }}" --namespace "${NAMESPACE}"

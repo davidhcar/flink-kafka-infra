@@ -1,0 +1,92 @@
+# ==============================================================================
+# Flinkflow Enterprise Multi-Environment Profiles
+# Used by: AI Studio UI (Settings Drawer) & Enterprise CI/CD Deployment Pipelines
+# Standard Ports:
+#   - Kafka: 9092 (Host/Cluster), 29092 (Docker Internal)
+#   - Schema Registry: 8081 (Cluster), 8084 (Local Host to prevent 8081 collision)
+#   - PostgreSQL: 5432 (Standard JDBC)
+#   - Flink Web UI / REST: 8081 (Standard Flink)
+#   - OMOP Vocab Service: 8082
+# ==============================================================================
+
+version: "1.0"
+active_environment: "local"
+
+environments:
+  # ----------------------------------------------------------------------------
+  # 1. Local Environment (Local Docker Cluster + Cloud API LLM)
+  # ----------------------------------------------------------------------------
+  local:
+    name: "Local Docker Engine"
+    description: "Fast local development on Docker Compose with cloud API LLM"
+    type: "docker"
+    icon: "🐳"
+    endpoints:
+      kafka_bootstrap: "localhost:9092"
+      kafka_bootstrap_internal: "kafka:29092"
+      schema_registry_url: "http://localhost:8084"
+      postgres_url: "jdbc:postgresql://localhost:5432/outbox_demo"
+      vocab_service_url: "http://localhost:8082"
+      flink_jobmanager_url: "http://localhost:8081"
+      langfuse_url: "http://localhost:4000"
+    topics:
+      omop_events_topic: "omop-standard-events"
+      omop_ai_alerts_topic: "omop-cdss-ai-alerts"
+      webtraffic_topic: "webtraffic"
+    llm:
+      provider: "gemini" # gemini | openai
+      model: "gemini-2.0-flash"
+      api_key_env: "GEMINI_API_KEY"
+
+  # ----------------------------------------------------------------------------
+  # 2. Staging Environment (Pre-Production Kubernetes Cluster)
+  # ----------------------------------------------------------------------------
+  staging:
+    name: "Staging Kubernetes"
+    description: "Pre-production validation cluster with integration testing"
+    type: "kubernetes"
+    icon: "🟢"
+    cluster:
+      namespace: "flink-staging"
+      context: "k8s-staging-cluster"
+      flink_operator_enabled: true
+    endpoints:
+      kafka_bootstrap: "kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"
+      schema_registry_url: "http://schema-registry.kafka.svc.cluster.local:8081"
+      postgres_url: "jdbc:postgresql://postgres.flink-staging.svc.cluster.local:5432/outbox_demo"
+      vocab_service_url: "http://vocab-service.flink-staging.svc.cluster.local:8082"
+      flink_jobmanager_url: "http://omop-ai-cdss-agent-pipeline-rest.flink-staging.svc.cluster.local:8081"
+    topics:
+      omop_events_topic: "staging-omop-standard-events"
+      omop_ai_alerts_topic: "staging-omop-cdss-ai-alerts"
+    llm:
+      provider: "gemini"
+      model: "gemini-2.0-flash"
+      api_key_secret: "flinkflow-secrets/GEMINI_API_KEY"
+
+  # ----------------------------------------------------------------------------
+  # 3. Production Environment (Mission-Critical Kubernetes Cluster)
+  # ----------------------------------------------------------------------------
+  production:
+    name: "Production Kubernetes"
+    description: "High-Availability Production Cluster with 24/7 SLA & RocksDB HA"
+    type: "kubernetes"
+    icon: "🔴"
+    cluster:
+      namespace: "flink-production"
+      context: "k8s-prod-cluster"
+      flink_operator_enabled: true
+      require_approval_gate: true
+    endpoints:
+      kafka_bootstrap: "kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"
+      schema_registry_url: "http://schema-registry.kafka.svc.cluster.local:8081"
+      postgres_url: "jdbc:postgresql://postgres.flink-production.svc.cluster.local:5432/outbox_demo"
+      vocab_service_url: "http://vocab-service.flink-production.svc.cluster.local:8082"
+      flink_jobmanager_url: "http://omop-ai-cdss-agent-pipeline-rest.flink-production.svc.cluster.local:8081"
+    topics:
+      omop_events_topic: "prod-omop-standard-events"
+      omop_ai_alerts_topic: "prod-omop-cdss-ai-alerts"
+    llm:
+      provider: "gemini"
+      model: "gemini-2.0-flash"
+      api_key_secret: "flinkflow-secrets/GEMINI_API_KEY"
